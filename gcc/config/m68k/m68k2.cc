@@ -71,6 +71,7 @@ struct m68k_args
   long regs_already_used;
   int last_arg_reg;
   int last_arg_len;
+  int arg_num;
   tree current_param_type; /* New field: formal type of the current argument.  */
   tree fntype; /* initial function type */
 };
@@ -113,6 +114,7 @@ m68k_init_cumulative_args (CUMULATIVE_ARGS *cump, tree fntype, tree decl)
 
   cum->last_arg_reg = -1;
   cum->regs_already_used = 0;
+  cum->arg_num = 0;
 
   if (!fntype && decl)
     fntype = TREE_TYPE(decl);
@@ -230,6 +232,8 @@ void m68k_function_arg_advance (cumulative_args_t cum_v,
 
   DPRINTF((stderr, "m68k_function_arg_advance1 %p\r\n", cum));
 
+  ++cum->arg_num;
+
   if (cum->last_arg_reg != -1)
     {
       int count;
@@ -335,8 +339,39 @@ rtx m68k_function_arg (cumulative_args_t cum_v, const function_arg_info & ai)
   if (asmtree)
     {
       int i;
+      tree fntype = cum->fntype;
+      tree arg_types = TYPE_ARG_TYPES(fntype);
+      tree this_arg_type = NULL;
+      machine_mode unpromoted_mode;
+      int arg_index = 0;
+
       cum->last_arg_reg = TREE_INT_CST_LOW(TREE_VALUE(TREE_VALUE(asmtree)));
-      cum->last_arg_len = ai.mode == DImode ? 2 : 1;
+
+      /* Find the correct argument type from fntype by position for data regs */
+      /* cum->arg_num tells us which argument we're processing */
+      if (cum->last_arg_reg < 8)
+	for (this_arg_type = arg_types; this_arg_type; this_arg_type = TREE_CHAIN(this_arg_type))
+	{
+	  if (arg_index == cum->arg_num) /* You need to track arg_num in cum */
+	  {
+	    tree arg_type = TREE_VALUE(this_arg_type);
+	    unpromoted_mode = TYPE_MODE(arg_type);
+	    break;
+	  }
+	  arg_index++;
+	}
+
+      /* Fallback: use type */
+      if (!this_arg_type)
+        unpromoted_mode = TYPE_MODE(ai.type);
+
+      if (unpromoted_mode == XFmode)
+    	  cum->last_arg_len = 3;
+      else
+      if (unpromoted_mode == DImode || unpromoted_mode == DFmode)
+    	  cum->last_arg_len = 2;
+      else
+    	  cum->last_arg_len = 1;
 
       for (i = 0; i < cum->last_arg_len; i++)
 	{
@@ -347,7 +382,8 @@ rtx m68k_function_arg (cumulative_args_t cum_v, const function_arg_info & ai)
 	    }
 	  cum->regs_already_used |= (1 << (cum->last_arg_reg + i));
 	}
-      return gen_rtx_REG (ai.mode, cum->last_arg_reg);
+
+      return gen_rtx_REG (unpromoted_mode, cum->last_arg_reg);
     }
   return _m68k_function_arg (cum, ai.mode, ai.type);
 }
@@ -446,7 +482,7 @@ m68k_handle_type_attribute (tree *node, tree name, tree args, int flags ATTRIBUT
 
 	      if (lookup_attribute ("stkparm", TYPE_ATTRIBUTES(nnn)))
 		{
-		  error ("%'regparm%' and %'stkparm%' aka %'__stdargs%' are mutually exclusive");
+		  error ("%'regparm%' and %'stkparm%' aka %'stdargs%' are mutually exclusive");
 		  break;
 		}
 	      if (args && TREE_CODE (args) == TREE_LIST)
@@ -474,7 +510,7 @@ m68k_handle_type_attribute (tree *node, tree name, tree args, int flags ATTRIBUT
 	    {
 	      if (lookup_attribute ("regparm", TYPE_ATTRIBUTES(nnn)))
 		{
-		  error ("%'regparm%' and %'stkparm%' aka %'__stdargs%' are mutually exclusive");
+		  error ("%'regparm%' and %'stkparm%' aka %'stdargs%' are mutually exclusive");
 		  break;
 		}
 	    }
