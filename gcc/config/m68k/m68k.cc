@@ -173,7 +173,7 @@ static tree m68k_handle_fndecl_attribute (tree *node, tree name,
 					  tree args, int flags,
 					  bool *no_add_attrs);
 static void m68k_compute_frame_layout (void);
-static bool m68k_save_reg (unsigned int regno, bool interrupt_handler);
+static bool m68k_save_reg (unsigned int regno, bool interrupt_handler, bool first);
 static bool m68k_ok_for_sibcall_p (tree, tree);
 static bool m68k_tls_symbol_p (rtx);
 static rtx m68k_legitimize_address (rtx, rtx, machine_mode);
@@ -856,6 +856,7 @@ m68k_compute_frame_layout (void)
     m68k_get_function_kind (current_function_decl);
   bool interrupt_handler = func_kind == m68k_fk_interrupt_handler;
   bool interrupt_thread = func_kind == m68k_fk_interrupt_thread;
+  bool first = current_frame.size == 0;
 
   /* Only compute the frame once per function.
      Don't cache information until reload has been completed.  */
@@ -870,7 +871,7 @@ m68k_compute_frame_layout (void)
   /* Interrupt thread does not need to save any register.  */
   if (!interrupt_thread)
     for (regno = 0; regno < 16; regno++)
-      if (m68k_save_reg (regno, interrupt_handler))
+      if (m68k_save_reg (regno, interrupt_handler, first))
 	{
 	  mask |= 1 << (regno - D0_REG);
 	  saved++;
@@ -886,7 +887,7 @@ m68k_compute_frame_layout (void)
       /* Interrupt thread does not need to save any register.  */
       if (!interrupt_thread)
 	for (regno = 16; regno < 24; regno++)
-	  if (m68k_save_reg (regno, interrupt_handler))
+	  if (m68k_save_reg (regno, interrupt_handler, first))
 	    {
 	      mask |= 1 << (regno - FP0_REG);
 	      saved++;
@@ -934,6 +935,39 @@ m68k_initial_elimination_offset (int from, int to)
     }
 }
 
+
+static bool
+m68k_is_reg_written (int regno)
+{
+  for (df_ref def = DF_REG_DEF_CHAIN (regno); def != NULL;
+       def = DF_REF_NEXT_REG (def))
+    {
+      if (DF_REF_IS_ARTIFICIAL (def))
+        continue;
+
+      rtx_insn *insn = DF_REF_INSN (def);
+      if (!NONDEBUG_INSN_P (insn))
+        continue;
+
+      rtx set = single_set (insn);
+      if (!set)
+        return true;  /* Can't analyze, assume modified */
+
+      rtx dst = SET_DEST (set);
+      if (!REG_P (dst) || REGNO (dst) != regno)
+        continue;  /* Not a definition of our register */
+
+      rtx src = SET_SRC (set);
+      /* Self-copy doesn't change value */
+      if (REG_P (src) && REGNO (src) == regno)
+        continue;
+
+      /* Any other definition changes the value */
+      return true;
+    }
+  return true;
+}
+
 /* Refer to the array `regs_ever_live' to determine which registers
    to save; `regs_ever_live[I]' is nonzero if register number I
    is ever used in the function.  This function is responsible for
@@ -941,7 +975,7 @@ m68k_initial_elimination_offset (int from, int to)
    Return true if we need to save REGNO.  */
 
 static bool
-m68k_save_reg (unsigned int regno, bool interrupt_handler)
+m68k_save_reg (unsigned int regno, bool interrupt_handler, bool first)
 {
   tree attrs = TYPE_ATTRIBUTES (TREE_TYPE (current_function_decl));
   if (lookup_attribute ("entrypoint", attrs))
@@ -999,6 +1033,9 @@ m68k_save_reg (unsigned int regno, bool interrupt_handler)
 
   /* Never need to save registers that aren't touched.  */
   if (!df_regs_ever_live_p (regno))
+    return false;
+
+  if (first && !m68k_is_reg_written(regno))
     return false;
 
   /* Otherwise save everything that isn't call-clobbered.  */
