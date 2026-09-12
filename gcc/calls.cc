@@ -2207,42 +2207,37 @@ load_register_parameters (struct arg_data *args, int num_actuals,
 	  machine_mode reg_mode = GET_MODE (reg);
 	  machine_mode val_mode = GET_MODE (val);
 
-	  /* Handle constants or void modes (which lack a distinct mode size) */
-	  if (val_mode == VOIDmode)
-	  {
-		emit_move_insn (reg, val);
-	  }
-	  else if (MEM_P (val))
-	  {
-		/* Use known_lt to safely compare poly_int sizes */
-		if (known_lt (GET_MODE_SIZE (reg_mode), GET_MODE_SIZE (val_mode)))
-		{
-		  /* Truncate MEM using lowpart/adjust_address safely */
-		  rtx mem_sub = adjust_address (val, reg_mode, 0);
-		  emit_move_insn (reg, mem_sub);
-		}
-		else
-		{
-		  emit_move_insn (reg, val);
-		}
-	  }
-	  else if (REG_P (val))
-	  {
-		if (known_lt (GET_MODE_SIZE (reg_mode), GET_MODE_SIZE (val_mode)))
-		{
-		  /* Use gen_lowpart for register mode narrowing */
-		  rtx subreg = gen_lowpart (reg_mode, val);
-		  emit_move_insn (reg, subreg);
-		}
-		else
-		{
-		  emit_move_insn (reg, val);
-		}
-	  }
-	  else
-	  {
-		emit_move_insn (reg, val);
-	  }
+      if (MEM_P(val))
+      {
+        if (known_lt (GET_MODE_SIZE (reg_mode), GET_MODE_SIZE (val_mode)))
+        {
+          /* Adjust the MEM mode to match reg_mode (taking the low part) */
+          rtx low_mem = adjust_address(val, reg_mode, 0);
+          emit_move_insn(reg, low_mem);
+        }
+        else
+        {
+          emit_move_insn(reg, val);
+        }
+      }
+      else if (REG_P(val))
+      {
+        if (known_lt (GET_MODE_SIZE (reg_mode), GET_MODE_SIZE (val_mode)))
+        {
+          rtx subreg = gen_lowpart(reg_mode, val);
+          emit_move_insn(reg, subreg);
+        }
+        else
+        {
+          emit_move_insn(reg, val);
+        }
+      }
+      else
+      {
+        /* For CONST_INT or void-mode constants, gen_lowpart handles truncation */
+        rtx low_val = gen_lowpart_if_possible(reg_mode, val);
+        emit_move_insn(reg, low_val ? low_val : val);
+      }
 #else
       emit_move_insn(reg, args[i].value);
 #endif
