@@ -187,10 +187,10 @@ do									\
     if (flag_sanitize)							\
       error ("%<-fsanitize%> is not supported on this target");		\
     /* Default to LRA: the old reload pass ICEs on some DImode code	\
-       (PR 127300, -O1 -fext-dce) and LRA is what upstream is	\
-       moving to.  -mno-lra still selects reload.  */			\
+       (PR 127300, -O1 -fext-dce) and LRA is what upstream is	        \
+       moving to.  -mno-lra still selects reload.    			\
     if (!OPTION_SET_P (m68k_lra_p))					\
-      m68k_lra_p = 1;							\
+      m68k_lra_p = 1; */						\
   }									\
 while (0)
 
