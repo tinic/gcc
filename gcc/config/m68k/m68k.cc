@@ -725,6 +725,14 @@ m68k_option_override (void)
       opt_fstack_limit_register_no = -1;
     }
 
+  /* Default to LRA: the old reload pass ICEs on some DImode code
+     (PR 127300, -O1 -fext-dce) and LRA is what upstream is
+     moving to.  -mno-lra still selects reload. */
+  if (!OPTION_SET_P (m68k_lra_p))
+    m68k_lra_p = 1;
+  if (optimize >= 2)
+	SET_OPTION_IF_UNSET (&global_options, &global_options_set, flag_tree_dom, 0);
+
   SUBTARGET_OVERRIDE_OPTIONS;
 
   /* Setup scheduling options.  */
@@ -5068,7 +5076,7 @@ print_operand (FILE *file, rtx op, int letter)
     m68k_adjust_decorated_operand (op);
 
   if (letter == '.')
-    {
+	{
       if (MOTOROLA)
 	fprintf (file, ".");
     }
