@@ -770,8 +770,14 @@ m68k_option_override (void)
      moving to.  -mno-lra still selects reload. */
   if (!OPTION_SET_P (m68k_lra_p))
     m68k_lra_p = 1;
-  if (optimize >= 2)
-	SET_OPTION_IF_UNSET (&global_options, &global_options_set, flag_tree_dom, 0);
+  if (optimize >= 1)
+    {
+      /* Stefan "Bebbo" Franke:
+         M68K is CISC not RISC, do not disrupt the code to preserve auto inc!
+       */
+      SET_OPTION_IF_UNSET (&global_options, &global_options_set, flag_tree_dom, 0);
+      SET_OPTION_IF_UNSET (&global_options, &global_options_set, flag_tree_sink, 0);
+    }
 
   SUBTARGET_OVERRIDE_OPTIONS;
 
