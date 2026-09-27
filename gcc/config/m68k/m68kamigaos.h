@@ -264,22 +264,43 @@ if (target_flags & (MASK_RESTORE_A4|MASK_ALWAYS_RESTORE_A4)) \
 #define CROSS_DIRECTORY_STRUCTURE
 #endif
 
+extern const char * amiga_m68k_prefix_func(int, const char **);
+extern const char *amigaos_crt_check (int argc, const char **argv);
+
+#undef EXTRA_SPEC_FUNCTIONS
+#define EXTRA_SPEC_FUNCTIONS \
+  { "amigaos-crt-check", amigaos_crt_check }, \
+  { "sdk_root", amiga_m68k_prefix_func },
+
 #undef FIXED_INCLUDE_DIR
 #define FIXED_INCLUDE_DIR CROSS_INCLUDE_DIR "/../ndk-include"
 
 /* When creating shared libraries, use different 'errno'. */
 #define CPP_IXEMUL_SPEC \
-  "-isystem %:find-file(../ixemul/include) " \
+  "-isystem %:sdk_root(ixemul/include) " \
   "%{!ansi:-Dixemul} -D__ixemul__ -D__ixemul " \
   "%{malways-restore-a4:-Derrno=(*ixemul_errno)} " \
   "%{mrestore-a4:-Derrno=(*ixemul_errno)}"
 #define CPP_LIBNIX_SPEC \
-  "-isystem %:find-file(../libnix/include) " \
+  "-isystem %:sdk_root(libnix/include) " \
   "%{!ansi:-Dlibnix} -D__libnix__ -D__libnix " \
   "%{mcrt=nix13:-D__KICK13__}"
 #define CPP_CLIB2_SPEC \
-  "-isystem %:find-file(../clib2/include) " \
+  "-isystem %:sdk_root(clib2/include) " \
   "%{!ansi:-DCLIB2} -D__CLIB2__ -D__CLIB2"
+
+/* A program gets one C runtime, so the driver rejects two selectors rather
+   than picking one: the choice decides the header path, the startup file and
+   the libraries.  The vasm configuration has one fixed startup file and
+   library set, so there is nothing to check there.  */
+
+#ifdef TARGET_AMIGAOS_VASM
+#define CRT_CHECK_SPEC ""
+#else
+#define CRT_CHECK_SPEC \
+  "%{mcrt=*:%:amigaos-crt-check(-mcrt=%*)} " \
+  "%{noixemul:%:amigaos-crt-check(-noixemul)} "
+#endif
 
 /* Define __HAVE_68881__ in preprocessor according to the -m flags.
    This will control the use of inline 68881 insns in certain macros.
@@ -305,11 +326,13 @@ if (target_flags & (MASK_RESTORE_A4|MASK_ALWAYS_RESTORE_A4)) \
   "%{m68030:-D__mc68030__ -D__mc68030} " \
   "%{m68040:-D__mc68040__ -D__mc68040} " \
   "%{m68060:-D__mc68060__ -D__mc68060} " \
-  "%{mcrt=nix13:-isystem %:find-file(../ndk13-include)} " \
+  "-isystem %:sdk_root(../include) " \
+  "%{mcrt=nix13:-isystem %:sdk_root(ndk13-include)} " \
   "%{noixemul:%(cpp_libnix)} " \
   "%{mcrt=nix*:%(cpp_libnix)} " \
   "%{mcrt=ixemul:%(cpp_ixemul)} " \
-  "%{mcrt=clib2:%(cpp_clib2)}"
+  "%{mcrt=clib2:%(cpp_clib2)} " \
+  CRT_CHECK_SPEC
 
 /* Various -m flags require special flags to the assembler.  */
 
@@ -385,11 +408,11 @@ if (target_flags & (MASK_RESTORE_A4|MASK_ALWAYS_RESTORE_A4)) \
     "crt0.o%s "
 
 #define SELF_SPEC \
- "%{noixemul:-B %:find-file(../libnix/lib/)} " \
- "%{mcrt=nix*:-B %:find-file(../libnix/lib/)} " \
- "%{mcrt=library:-B %:find-file(../libnix/lib/)} " \
- "%{mcrt=ixemul:-B %:find-file(../ixemul/lib/)} " \
- "%{mcrt=clib2:-B %:find-file(../clib2/lib/)} "
+ "%{noixemul:-B %:sdk_root(libnix/lib/)} " \
+ "%{mcrt=nix*:-B %:sdk_root(libnix/lib/)} " \
+ "%{mcrt=library:-B %:sdk_root(libnix/lib/)} " \
+ "%{mcrt=ixemul:-B %:sdk_root(ixemul/lib/)} " \
+ "%{mcrt=clib2:-B %:sdk_root(clib2/lib/)} "
 
 #undef    STARTFILE_SPEC
 #ifdef TARGET_AMIGAOS_VASM
@@ -402,6 +425,7 @@ if (target_flags & (MASK_RESTORE_A4|MASK_ALWAYS_RESTORE_A4)) \
   "%{mcrt=library:%(startfile_libnix)} " \
   "%{mcrt=ixemul:%(startfile_ixemul)} " \
   "%{mcrt=clib2:%(startfile_clib2)} " \
+  "%{mcrt=newlib:%(startfile_newlib)} " \
   "%{!mcrt=*:%{!noixemul:%(startfile_newlib)}} "
 #endif
 
@@ -455,6 +479,7 @@ if (target_flags & (MASK_RESTORE_A4|MASK_ALWAYS_RESTORE_A4)) \
   "%{mcrt=nix*:%(lib_libnix)} " \
   "%{mcrt=ixemul:%(lib_ixemul)} " \
   "%{mcrt=clib2:%(lib_clib2)} " \
+  "%{mcrt=newlib:%(lib_newlib)} " \
   "%{!mcrt=*:%{!noixemul:%(lib_newlib)}} " \
   "%{fprofile-arcs|fprofile-generate*|coverage:-lgcov} " \
   "-lamiga -lgcc "\
@@ -470,9 +495,9 @@ if (target_flags & (MASK_RESTORE_A4|MASK_ALWAYS_RESTORE_A4)) \
    Also, pass appropriate linker flavours depending on user-supplied
    commandline options.  */
 
-#define LINK_IXEMUL_SPEC "-L%:find-file(../ixemul/lib)"
-#define LINK_LIBNIX_SPEC "-L%:find-file(../libnix/lib)"
-#define LINK_CLIB2_SPEC "-L%:find-file(../clib2/lib)"
+#define LINK_IXEMUL_SPEC "-L%:sdk_root(ixemul/lib)"
+#define LINK_LIBNIX_SPEC "-L%:sdk_root(libnix/lib)"
+#define LINK_CLIB2_SPEC "-L%:sdk_root(clib2/lib)"
 
 /* If debugging, tell the linker to output amiga-hunk symbols *and* a BSD
    compatible debug hunk.
@@ -492,6 +517,7 @@ if (target_flags & (MASK_RESTORE_A4|MASK_ALWAYS_RESTORE_A4)) \
   "%(link_cpu) "
 #else
 #define LINK_SPEC \
+  "-L%:sdk_root(../lib) " \
   "%{fexceptions:-u___init_eh } "\
   "%{noixemul:%(link_libnix)} " \
   "%{mcrt=nix*:%(link_libnix)} " \
@@ -503,6 +529,7 @@ if (target_flags & (MASK_RESTORE_A4|MASK_ALWAYS_RESTORE_A4)) \
   "%{fbaserel32:%{!resident32:-m amiga_bss -fl libb32}} " \
   "%{resident32:-m amiga_bss -amiga-datadata-reloc -fl libb32} " \
   "%{g:-amiga-debug-hunk} " \
+  CRT_CHECK_SPEC \
   "%(link_cpu) "
 #endif
 
@@ -546,7 +573,7 @@ if (target_flags & (MASK_RESTORE_A4|MASK_ALWAYS_RESTORE_A4)) \
 	  "%(linker) " LINK_PLUGIN_SPEC "%l %X %{o*} %{A} %{d} %{e*} %{m} " \
           "%{N} %{n} %{r} %{s} %{t} %{u*} %{x} %{z} %{Z} " \
           "%{!A:%{!nostdlib:%{!nostartfiles:%S}}} " \
-          "%{static:} %{L*} %F %o " \
+          "%{static:} %{L*} %F -L%:sdk_root(lib/) -L%:sdk_root(lib/) %o " \
           "%{!nostdlib:%{!nodefaultlibs:%L}} " \
           "%{!A:%{!nostdlib:%{!nostartfiles:%E}}} " \
           "%{!nostdlib:%{!nodefaultlibs:%G}} " \
