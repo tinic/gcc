@@ -1,6 +1,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 
+asm(".globl __Znwm; __Znwm = __Znwj");
 void * _Znwj (unsigned sz)
 {
   void *p = malloc(sz);
