@@ -777,6 +777,12 @@ m68k_option_override (void)
   if (!OPTION_SET_P (m68k_lra_p))
     m68k_lra_p = 1;
 
+  /* On m68k, the default IRA region handling produces worse code for
+     functions with nested loops.  Default to mixed region unless the user
+     explicitly asked for something else.  */
+  SET_OPTION_IF_UNSET (&global_options, &global_options_set,
+		       flag_ira_region, IRA_REGION_MIXED);
+
   SUBTARGET_OVERRIDE_OPTIONS;
 
   /* Setup scheduling options.  */
