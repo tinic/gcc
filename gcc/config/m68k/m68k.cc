@@ -36,6 +36,7 @@ along with GCC; see the file COPYING3.  If not see
 #include "stor-layout.h"
 #include "varasm.h"
 #include "regs.h"
+#include "function-abi.h"
 #include "insn-config.h"
 #include "conditions.h"
 #include "output.h"
@@ -122,6 +123,10 @@ struct m68k_frame
 
   /* Function which the above information refers to.  */
   int funcdef_no;
+
+  /* Registers which have been written or allocated during frame layout.
+     Keep this set monotonic while reload adjusts elimination offsets.  */
+  HARD_REG_SET written_regs;
 };
 
 /* Current frame information calculated by m68k_compute_frame_layout().  */
@@ -910,6 +915,67 @@ m68k_handle_fndecl_attribute (tree *node, tree name,
   return NULL_TREE;
 }
 
+/* Record an entire register destination, including partial writes.  Before
+   reload, allocated pseudos must also count as writes of their hard registers.  */
+static void
+m68k_record_reg_write (rtx dest, const_rtx pattern, void *data)
+{
+  while (SUBREG_P (dest))
+    dest = SUBREG_REG (dest);
+  if (!REG_P (dest))
+    return;
+
+  unsigned int regno = REGNO (dest);
+  if (regno >= FIRST_PSEUDO_REGISTER)
+    {
+      if (!(reload_in_progress || lra_in_progress || reload_completed)
+	  || !reg_renumber || reg_renumber[regno] < 0)
+	return;
+      regno = reg_renumber[regno];
+    }
+
+  /* The incoming argument copy can be coalesced into its original register.
+     Such a whole-register self copy does not alter the saved value.  */
+  if (pattern && GET_CODE (pattern) == SET
+      && SET_DEST (pattern) == dest && REG_P (SET_SRC (pattern))
+      && GET_MODE (dest) == GET_MODE (SET_SRC (pattern))
+      && known_ge (GET_MODE_SIZE (GET_MODE (dest)), UNITS_PER_WORD))
+    {
+      unsigned int srcno = REGNO (SET_SRC (pattern));
+      if (srcno >= FIRST_PSEUDO_REGISTER && reg_renumber
+	  && (reload_in_progress || lra_in_progress || reload_completed)
+	  && reg_renumber[srcno] >= 0)
+	srcno = reg_renumber[srcno];
+      if (srcno == regno)
+	return;
+    }
+  add_to_hard_reg_set ((HARD_REG_SET *) data, GET_MODE (dest), regno);
+}
+
+/* Collect writes before choosing the save area, rather than changing its size
+   after argument and local references have been eliminated.  Retain writes
+   from earlier allocation iterations even if the defining insn disappears.  */
+static void
+m68k_collect_reg_writes (HARD_REG_SET *written)
+{
+  for (rtx_insn *insn = get_insns (); insn; insn = NEXT_INSN (insn))
+    if (NONDEBUG_INSN_P (insn))
+      {
+	note_stores (insn, m68k_record_reg_write, written);
+	if (CALL_P (insn))
+	  *written |= insn_callee_abi (insn).full_reg_clobbers ();
+	for (rtx note = REG_NOTES (insn); note; note = XEXP (note, 1))
+	  if (REG_NOTE_KIND (note) == REG_INC)
+	    m68k_record_reg_write (XEXP (note, 0), NULL_RTX, written);
+
+	/* REG_INC notes need not have been updated yet during reload.  */
+	subrtx_iterator::array_type array;
+	FOR_EACH_SUBRTX (iter, array, PATTERN (insn), NONCONST)
+	  if (GET_RTX_CLASS (GET_CODE (*iter)) == RTX_AUTOINC)
+	    m68k_record_reg_write (XEXP (*iter, 0), NULL_RTX, written);
+      }
+}
+
 static void
 m68k_compute_frame_layout (void)
 {
@@ -925,6 +991,10 @@ m68k_compute_frame_layout (void)
   if (current_frame.funcdef_no == current_function_funcdef_no
       && reload_completed)
     return;
+
+  if (current_frame.funcdef_no != current_function_funcdef_no)
+    CLEAR_HARD_REG_SET (current_frame.written_regs);
+  m68k_collect_reg_writes (&current_frame.written_regs);
 
   current_frame.size = (get_frame_size () + 3) & -4;
 
@@ -1062,6 +1132,14 @@ m68k_save_reg (unsigned int regno, bool interrupt_handler)
 
   /* Never need to save registers that aren't touched.  */
   if (!df_regs_ever_live_p (regno))
+    return false;
+
+  /* Reading an incoming register does not require preserving it.  Keep the
+     special save policies above, and limit this to integer registers whose
+     complete call clobbers can be represented by the write set.  */
+  if (regno < 16 && !crtl->saves_all_registers
+      && (reload_in_progress || lra_in_progress || reload_completed)
+      && !TEST_HARD_REG_BIT (current_frame.written_regs, regno))
     return false;
 
   /* Otherwise save everything that isn't call-clobbered.  */
