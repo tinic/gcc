@@ -21,6 +21,7 @@ along with GCC; see the file COPYING3.  If not see
 
 #ifdef RTX_CODE
 extern enum m68k_function_kind m68k_get_function_kind (tree);
+extern bool m68k_indexed_word_scratch_ok (rtx);
 extern HOST_WIDE_INT m68k_initial_elimination_offset (int from, int to);
 
 extern void split_di (rtx[], int, rtx[], rtx[]);

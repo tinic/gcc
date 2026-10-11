@@ -982,6 +982,21 @@ m68k_collect_reg_writes (HARD_REG_SET *written)
       }
 }
 
+/* Peephole scratches must not add a save after the prologue is emitted.
+   Restrict this load rewrite to ordinary caller-clobbered data registers.  */
+bool
+m68k_indexed_word_scratch_ok (rtx reg)
+{
+  tree attrs = TYPE_ATTRIBUTES (TREE_TYPE (current_function_decl));
+  return (REGNO (reg) <= D0_REG + 1
+          && crtl->abi->clobbers_full_reg_p (REGNO (reg))
+          && !crtl->saves_all_registers
+          && !lookup_attribute ("saveallregs", attrs)
+          && !lookup_attribute ("entrypoint", attrs)
+          && m68k_get_function_kind (current_function_decl)
+             == m68k_fk_normal_function);
+}
+
 static void
 m68k_compute_frame_layout (void)
 {
