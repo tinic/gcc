@@ -4,8 +4,8 @@
    unwound to the caller with the register clobbered.  F1 takes the register
    from regparm (4), F2 from an __asm register parameter; both use the moveq
    peephole for a constant store.  F3 uses the one for a pop and a push.  */
-/* { dg-do run } */
-/* { dg-options "-Os -m68000 -fno-defer-pop" } */
+/* { dg-do run { target *-*-amigaos* } } */
+/* { dg-options "-Os -m68000 -fno-defer-pop -fexceptions" } */
 
 extern "C" void abort (void);
 

@@ -188,12 +188,17 @@ static HARD_REG_SET *pseudo_forbidden_regs;
    marked in this set.  */
 static HARD_REG_SET used_spill_regs;
 
+/* Hard registers that find_reloads chose as reload registers, such as an
+   input register that dies in the insn, rather than taking spill registers.
+   reload_as_needed loads or stores them.  */
+static HARD_REG_SET reload_reg_rtx_regs;
+
 /* A target whose save area depends on writes must reserve space for reload
    temporaries before reload_as_needed emits their defining instructions.  */
-const HARD_REG_SET &
+HARD_REG_SET
 reload_spill_reg_set (void)
 {
-  return used_spill_regs;
+  return used_spill_regs | reload_reg_rtx_regs;
 }
 
 /* Index of last register assigned as a spill register.  We allocate in
@@ -866,6 +871,7 @@ reload (rtx_insn *first, int global)
 
   /* Spill any hard regs that we know we can't eliminate.  */
   CLEAR_HARD_REG_SET (used_spill_regs);
+  CLEAR_HARD_REG_SET (reload_reg_rtx_regs);
   /* There can be multiple ways to eliminate a register;
      they should be listed adjacently.
      Elimination for any register fails only if all possible ways fail.  */
@@ -1530,6 +1536,21 @@ calculate_needs_all_insns (int global)
 		  continue;
 		}
 	    }
+	  /* find_reloads may choose a register that the insn already uses,
+	     such as an input that dies here, as a reload register.  An
+	     optional reload is done only when inherited, in a register that
+	     already holds the value; a reload from its own register or a
+	     canceled one loads nothing.  */
+	  for (int r = 0; r < n_reloads; r++)
+	    if (rld[r].reg_rtx && HARD_REGISTER_P (rld[r].reg_rtx)
+		&& !rld[r].optional
+		&& (rld[r].out
+		    || (rld[r].in && !rtx_equal_p (rld[r].in, rld[r].reg_rtx))
+		    || (!rld[r].in && rld[r].secondary_p)))
+	      add_to_hard_reg_set (&reload_reg_rtx_regs,
+				   GET_MODE (rld[r].reg_rtx),
+				   REGNO (rld[r].reg_rtx));
+
 	  if (num_eliminable)
 	    update_eliminable_offsets ();
 
