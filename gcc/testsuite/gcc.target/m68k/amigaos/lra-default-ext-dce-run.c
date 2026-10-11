@@ -1,4 +1,4 @@
-/* LRA is the default allocator on amigaos.  The old reload pass ICEs on
+/* LRA is the default allocator on amigaos.  The old reload pass used to ICE on
    this DImode code at -O1 -fext-dce on the 68000 (PR 127300,
    https://github.com/AmigaPorts/m68k-amigaos-gcc/issues/34): the check
    before the subtraction and the trailing call are both needed.  Run,
@@ -9,7 +9,6 @@
    effects, drops the call, and the subtraction narrows to 32 bits.  */
 /* { dg-do run } */
 /* { dg-additional-options "-fext-dce" } */
-/* { dg-skip-if "reload ICE, PR 127300" { *-*-* } { "-O1 -mno-lra" } { "" } } */
 
 extern long long get (void *);
 extern int err (void *);
