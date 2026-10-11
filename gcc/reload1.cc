@@ -188,6 +188,14 @@ static HARD_REG_SET *pseudo_forbidden_regs;
    marked in this set.  */
 static HARD_REG_SET used_spill_regs;
 
+/* A target whose save area depends on writes must reserve space for reload
+   temporaries before reload_as_needed emits their defining instructions.  */
+const HARD_REG_SET &
+reload_spill_reg_set (void)
+{
+  return used_spill_regs;
+}
+
 /* Index of last register assigned as a spill register.  We allocate in
    a round-robin fashion.  */
 static int last_spill_reg;
@@ -1022,6 +1030,11 @@ reload (rtx_insn *first, int global)
 	  if (insns_need_reload)
 	    something_changed |= finish_spills (global);
 	}
+
+      /* Selecting reload registers may change a write-dependent save area
+	 even when those registers were already ever-live.  Settle the new
+	 elimination offsets before emitting the reload instructions.  */
+      something_changed |= !verify_initial_elim_offsets ();
 
       if (! something_changed)
 	break;

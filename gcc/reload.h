@@ -327,6 +327,9 @@ extern class insn_chain *new_insn_chain (void);
 #endif
 
 #if defined HARD_CONST
+/* Registers selected for legacy reload moves, before those moves exist.  */
+extern const HARD_REG_SET &reload_spill_reg_set (void);
+
 extern void compute_use_by_pseudos (HARD_REG_SET *, bitmap);
 #endif
 
