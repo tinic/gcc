@@ -53,7 +53,7 @@
 ;; counter constraints and assembly unchanged.
 ;; =========================================================================
 
-;; 1. The native 16-Bit Loop
+;; 1. The native 16-Bit Loop: DBRA preserves every condition code.
 (define_insn "*m68k_doloop_hi16"
   [(set (pc)
         (if_then_else
@@ -67,7 +67,8 @@
    (clobber (match_scratch:HI 2 "=X"))]
   ""
   "dbra %0,%l1"
-  [(set_attr "type" "bcc")])
+  [(set_attr "type" "bcc")
+   (set_attr "flags_valid" "unchanged")])
 
 ;; 2. The 32-Bit Nested Loop
 (define_insn "*m68k_doloop_si32"
