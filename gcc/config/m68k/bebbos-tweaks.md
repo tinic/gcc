@@ -47,7 +47,10 @@
 })
 
 ;; =========================================================================
-;; MATCHING INSN PATTERNS (LRA SAFE, CLOBBER ASSIGNS DATA REGISTER)
+;; MATCHING INSN PATTERNS
+;; These instructions use only the counter; the placeholder scratch must not
+;; require a physical register.  Keep the typed parallel representation,
+;; counter constraints and assembly unchanged.
 ;; =========================================================================
 
 ;; 1. The native 16-Bit Loop
@@ -61,7 +64,7 @@
    (set (match_dup 0)
         (plus:HI (match_dup 0)
                  (const_int -1)))
-   (clobber (match_scratch:HI 2 "=&d"))]
+   (clobber (match_scratch:HI 2 "=X"))]
   ""
   "dbra %0,%l1"
   [(set_attr "type" "bcc")])
@@ -77,7 +80,7 @@
    (set (match_dup 0)
         (plus:SI (match_dup 0)
                  (const_int -1)))
-   (clobber (match_scratch:SI 2 "=&r"))]
+   (clobber (match_scratch:SI 2 "=X"))]
   ""
   "*
   {
