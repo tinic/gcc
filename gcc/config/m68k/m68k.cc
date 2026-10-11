@@ -958,6 +958,12 @@ m68k_record_reg_write (rtx dest, const_rtx pattern, void *data)
 static void
 m68k_collect_reg_writes (HARD_REG_SET *written)
 {
+  /* Legacy reload chooses spill temporaries before it emits their writes.
+     Treat those choices as writes while elimination offsets can still be
+     recomputed, rather than enlarging the save area after emission.  */
+  if (reload_in_progress)
+    *written |= reload_spill_reg_set ();
+
   for (rtx_insn *insn = get_insns (); insn; insn = NEXT_INSN (insn))
     if (NONDEBUG_INSN_P (insn))
       {
