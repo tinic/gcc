@@ -184,6 +184,7 @@ static bool m68k_ok_for_sibcall_p (tree, tree);
 static bool m68k_tls_symbol_p (rtx);
 static rtx m68k_legitimize_address (rtx, rtx, machine_mode);
 static bool m68k_rtx_costs (rtx, machine_mode, int, int, int *, bool);
+static int m68k_insn_cost (rtx_insn *, bool);
 static int m68k_address_cost(rtx x, machine_mode mode, addr_space_t t, bool speed);
 static int m68k_callee_save_cost (spill_cost_type, unsigned int, machine_mode,
 				  unsigned int, int, const HARD_REG_SET &,
@@ -311,6 +312,9 @@ m68k_use_by_pieces_infrastructure_p (unsigned HOST_WIDE_INT size,
 
 #undef TARGET_RTX_COSTS
 #define TARGET_RTX_COSTS m68k_rtx_costs
+
+#undef TARGET_INSN_COST
+#define TARGET_INSN_COST m68k_insn_cost
 
 #undef TARGET_ADDRESS_COST
 #define TARGET_ADDRESS_COST m68k_address_cost
@@ -7561,6 +7565,33 @@ m68k_costs (rtx x,
 	    int opno ATTRIBUTE_UNUSED,
 	    int *total,
 	    bool speed);
+
+/* Late combine can fold a two-byte MOVEQ plus a two-byte register AND
+   into a six-byte immediate AND after register allocation.  Use actual
+   size units for these positive small masks without changing the general
+   RTX costs used to allocate registers or the speed cost model.  */
+static int
+m68k_insn_cost (rtx_insn *insn, bool speed)
+{
+  if (TARGET_AMIGA && !TARGET_68020 && !TARGET_COLDFIRE
+      && reload_completed && !speed)
+    {
+      rtx set = single_set (insn);
+      if (set && GET_MODE (SET_DEST (set)) == SImode
+	  && DATA_REG_P (SET_DEST (set)))
+	{
+	  rtx src = SET_SRC (set);
+	  if (CONST_INT_P (src) && INTVAL (src) > 0 && INTVAL (src) <= 127)
+	    return COSTS_N_INSNS (1);
+	  if (GET_CODE (src) == AND && DATA_REG_P (XEXP (src, 0))
+	      && CONST_INT_P (XEXP (src, 1))
+	      && INTVAL (XEXP (src, 1)) > 0
+	      && INTVAL (XEXP (src, 1)) <= 127)
+	    return COSTS_N_INSNS (3);
+	}
+    }
+  return pattern_cost (PATTERN (insn), speed);
+}
 
 static bool
 m68k_rtx_costs (rtx x, machine_mode mode, int outer_code,
