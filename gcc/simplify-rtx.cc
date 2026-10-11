@@ -3146,7 +3146,8 @@ simplify_context::simplify_binary_operation_1 (rtx_code code,
 
       /* Integer addition is modulo the mode width, so X + ~X is -1.
 	 Preserve repeated side effects such as volatile memory reads.  */
-      if (SCALAR_INT_MODE_P (mode)
+      if ((SCALAR_INT_MODE_P (mode)
+	   || GET_MODE_CLASS (mode) == MODE_VECTOR_INT)
 	  && ((GET_CODE (op0) == NOT
 	       && rtx_equal_p (XEXP (op0, 0), op1))
 	      || (GET_CODE (op1) == NOT
@@ -9684,6 +9685,21 @@ test_vector_ops ()
 	  rtx scalar_reg = make_test_reg (GET_MODE_INNER (mode));
 	  test_vector_ops_duplicate (mode, scalar_reg);
 	  rtx vector_reg = make_test_reg (mode);
+	  if (GET_MODE_CLASS (mode) == MODE_VECTOR_INT)
+	    {
+	      rtx not_reg = gen_rtx_NOT (mode, vector_reg);
+	      ASSERT_RTX_EQ (CONSTM1_RTX (mode),
+			     simplify_gen_binary (PLUS, mode, vector_reg,
+						  not_reg));
+	      ASSERT_RTX_EQ (CONSTM1_RTX (mode),
+			     simplify_gen_binary (PLUS, mode, not_reg,
+						  vector_reg));
+	      rtx volatile_mem = gen_rtx_MEM (mode, make_test_reg (Pmode));
+	      MEM_VOLATILE_P (volatile_mem) = 1;
+	      rtx not_mem = gen_rtx_NOT (mode, volatile_mem);
+	      ASSERT_TRUE (simplify_binary_operation (PLUS, mode, volatile_mem,
+						     not_mem) == NULL_RTX);
+	    }
 	  if (GET_MODE_CLASS (mode) == MODE_VECTOR_INT
 	      && maybe_gt (GET_MODE_NUNITS (mode), 2))
 	    {
