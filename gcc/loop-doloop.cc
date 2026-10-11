@@ -718,7 +718,8 @@ doloop_optimize (class loop *loop)
 				   UNSIGNED);
   else
     iterations = 0;
-  if (!get_max_loop_iterations (loop, &iterations_max))
+  bool iterations_max_known = get_max_loop_iterations (loop, &iterations_max);
+  if (!iterations_max_known)
     iterations_max = 0;
   level = get_loop_level (loop) + 1;
   entered_at_top = (loop->latch == desc->in_edge->dest
@@ -737,8 +738,28 @@ doloop_optimize (class loop *loop)
      desc->niter_expr has been altered by the backend, so only extract
      that data after the gen_doloop_end.  */
   start_label = block_label (desc->in_edge->dest);
-  doloop_reg = gen_reg_rtx (mode);
+
+  /* IVOPTS cannot always introduce the preferred counter type, for example
+     when size optimization keeps the exit test in the loop header.  Honor
+     a narrower target preference here too, but only with a proven bound.
+     Leave room for the count increment that some doloop patterns need.  */
+  scalar_int_mode counter_mode = mode;
+  scalar_int_mode preferred_mode;
+  if (is_a <scalar_int_mode> (targetm.preferred_doloop_mode (mode),
+			     &preferred_mode)
+      && GET_MODE_PRECISION (preferred_mode) < GET_MODE_PRECISION (mode)
+      && iterations_max_known
+      && wi::ltu_p (iterations_max, GET_MODE_MASK (preferred_mode)))
+    counter_mode = preferred_mode;
+
+  doloop_reg = gen_reg_rtx (counter_mode);
   rtx_insn *doloop_seq = targetm.gen_doloop_end (doloop_reg, start_label);
+  if (!doloop_seq && counter_mode != mode)
+    {
+      counter_mode = mode;
+      doloop_reg = gen_reg_rtx (mode);
+      doloop_seq = targetm.gen_doloop_end (doloop_reg, start_label);
+    }
 
   max_cost
     = COSTS_N_INSNS (param_max_iterations_computation_cost);
@@ -752,6 +773,11 @@ doloop_optimize (class loop *loop)
     }
 
   count = copy_rtx (desc->niter_expr);
+  if (doloop_seq && counter_mode != mode)
+    {
+      count = lowpart_subreg (counter_mode, count, mode);
+      mode = counter_mode;
+    }
   word_mode_size = GET_MODE_PRECISION (word_mode);
   word_mode_max = (HOST_WIDE_INT_1U << (word_mode_size - 1) << 1) - 1;
   if (! doloop_seq
