@@ -454,7 +454,15 @@ rtx m68k_function_arg (cumulative_args_t cum_v, const function_arg_info & ai)
 	    }
 	  cum->regs_already_used |= (1 << (cum->last_arg_reg + i));
 	}
-      return gen_rtx_REG (ai.mode, cum->last_arg_reg);
+      /* An explicit byte or word data-register parameter uses the declared
+	 low part of the register.  Do not make its otherwise-unused upper
+	 bits live merely because the front end promoted its C type.  */
+      machine_mode reg_mode = ai.mode;
+      if (cum->last_arg_reg < 8 && INTEGRAL_TYPE_P (ptype)
+	  && (TYPE_MODE (ptype) == QImode || TYPE_MODE (ptype) == HImode)
+	  && GET_MODE_SIZE (TYPE_MODE (ptype)) < GET_MODE_SIZE (ai.mode))
+	reg_mode = TYPE_MODE (ptype);
+      return gen_rtx_REG (reg_mode, cum->last_arg_reg);
     }
   return _m68k_function_arg (cum, ai.mode, ai.type);
 }

@@ -2202,7 +2202,22 @@ load_register_parameters (struct arg_data *args, int num_actuals,
 
 	  else if (nregs == -1)
 	    {
-	      emit_move_insn (reg, args[i].value);
+	      /* An explicit register argument can retain its declared integer
+		 mode even when the front end promoted the argument value.
+		 Convert to that low part, respecting target byte order.  */
+	      rtx value = args[i].value;
+	      if (SCALAR_INT_MODE_P (GET_MODE (reg))
+		  && SCALAR_INT_MODE_P (GET_MODE (value))
+		  && known_lt (GET_MODE_SIZE (GET_MODE (reg)),
+			       GET_MODE_SIZE (GET_MODE (value))))
+		{
+		  /* A narrower volatile load would change the access itself.  */
+		  if (MEM_P (value) && MEM_VOLATILE_P (value))
+		    value = force_reg (GET_MODE (value), value);
+		  convert_move (reg, value, TYPE_UNSIGNED (type));
+		}
+	      else
+		emit_move_insn (reg, value);
 #ifdef BLOCK_REG_PADDING
 	      /* Handle case where we have a value that needs shifting
 		 up to the msb.  eg. a QImode value and we're padding
