@@ -989,12 +989,12 @@ m68k_indexed_word_scratch_ok (rtx reg)
 {
   tree attrs = TYPE_ATTRIBUTES (TREE_TYPE (current_function_decl));
   return (REGNO (reg) <= D0_REG + 1
-          && crtl->abi->clobbers_full_reg_p (REGNO (reg))
-          && !crtl->saves_all_registers
-          && !lookup_attribute ("saveallregs", attrs)
-          && !lookup_attribute ("entrypoint", attrs)
-          && m68k_get_function_kind (current_function_decl)
-             == m68k_fk_normal_function);
+	  && crtl->abi->clobbers_full_reg_p (REGNO (reg))
+	  && !crtl->saves_all_registers
+	  && !lookup_attribute ("saveallregs", attrs)
+	  && !lookup_attribute ("entrypoint", attrs)
+	  && m68k_get_function_kind (current_function_decl)
+	     == m68k_fk_normal_function);
 }
 
 static void
