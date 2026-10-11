@@ -3144,6 +3144,16 @@ simplify_context::simplify_binary_operation_1 (rtx_code code,
       else if (GET_CODE (op1) == NEG)
 	return simplify_gen_binary (MINUS, mode, op0, XEXP (op1, 0));
 
+      /* Integer addition is modulo the mode width, so X + ~X is -1.
+	 Preserve repeated side effects such as volatile memory reads.  */
+      if (SCALAR_INT_MODE_P (mode)
+	  && ((GET_CODE (op0) == NOT
+	       && rtx_equal_p (XEXP (op0, 0), op1))
+	      || (GET_CODE (op1) == NOT
+		  && rtx_equal_p (XEXP (op1, 0), op0)))
+	  && !side_effects_p (op0) && !side_effects_p (op1))
+	return CONSTM1_RTX (mode);
+
       /* (~a) + 1 -> -a */
       if (INTEGRAL_MODE_P (mode)
 	  && GET_CODE (op0) == NOT
@@ -8875,6 +8885,17 @@ test_scalar_int_ops (machine_mode mode)
 
   rtx and_op0_6 = simplify_gen_binary (AND, mode, op0, six);
   rtx and_op1_6 = simplify_gen_binary (AND, mode, op1, six);
+
+  /* Cancellation is independent of register allocation and target ISA.  */
+  ASSERT_RTX_EQ (CONSTM1_RTX (mode),
+		 simplify_gen_binary (PLUS, mode, op0, not_op0));
+  ASSERT_RTX_EQ (CONSTM1_RTX (mode),
+		 simplify_gen_binary (PLUS, mode, not_op0, op0));
+  rtx volatile_mem = gen_rtx_MEM (mode, make_test_reg (Pmode));
+  MEM_VOLATILE_P (volatile_mem) = 1;
+  rtx not_mem = gen_rtx_NOT (mode, volatile_mem);
+  ASSERT_TRUE (simplify_binary_operation (PLUS, mode, volatile_mem,
+					 not_mem) == NULL_RTX);
 
   /* Test some binary identities.  */
   ASSERT_RTX_EQ (op0, simplify_gen_binary (PLUS, mode, op0, const0_rtx));
