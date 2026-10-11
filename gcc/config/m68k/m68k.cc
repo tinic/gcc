@@ -915,6 +915,18 @@ m68k_handle_fndecl_attribute (tree *node, tree name,
   return NULL_TREE;
 }
 
+/* True if register elimination may replace REGNO, so that a copy from it
+   is a copy of a frame or argument address, not of the register contents.  */
+static bool
+m68k_eliminable_reg_p (unsigned int regno)
+{
+  static const struct { const int from, to; } elim[] = ELIMINABLE_REGS;
+  for (unsigned int i = 0; i < ARRAY_SIZE (elim); i++)
+    if ((unsigned int) elim[i].from == regno)
+      return true;
+  return false;
+}
+
 /* Record an entire register destination, including partial writes.  Before
    reload, allocated pseudos must also count as writes of their hard registers.  */
 static void
@@ -935,9 +947,13 @@ m68k_record_reg_write (rtx dest, const_rtx pattern, void *data)
     }
 
   /* The incoming argument copy can be coalesced into its original register.
-     Such a whole-register self copy does not alter the saved value.  */
+     Such a whole-register self copy does not alter the saved value.  A copy
+     of the frame or argument pointer is not one: when the destination shares
+     the eliminable register, elimination turns the source into an SP-based
+     address and the register is written.  */
   if (pattern && GET_CODE (pattern) == SET
       && SET_DEST (pattern) == dest && REG_P (SET_SRC (pattern))
+      && !m68k_eliminable_reg_p (REGNO (SET_SRC (pattern)))
       && GET_MODE (dest) == GET_MODE (SET_SRC (pattern))
       && known_ge (GET_MODE_SIZE (GET_MODE (dest)), UNITS_PER_WORD))
     {
