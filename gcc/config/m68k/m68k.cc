@@ -7608,9 +7608,12 @@ m68k_predict_doloop_p (class loop *loop)
 static machine_mode
 m68k_preferred_doloop_mode (machine_mode mode)
 {
-  /* dbra works on 16-bit (HImode) decrements natively, but if the loop count
-     is larger or already in SImode, SImode is fully supported by long-branch targets. */
-  if (mode == HImode || mode == QImode)
+  /* DBRA has a native 16-bit counter.  IVopts checks the proven iteration
+     bound before adopting a narrower preferred mode, and retains the
+     original type when that bound does not fit.  Request the native mode
+     even when the source loop uses a wider integer type.  */
+  if (mode == HImode || mode == QImode
+      || (mode == SImode && !TARGET_COLDFIRE))
     return HImode;
 
   return SImode;
