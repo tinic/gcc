@@ -205,6 +205,7 @@ static enum flt_eval_method
 m68k_excess_precision (enum excess_precision_type);
 static unsigned int m68k_hard_regno_nregs (unsigned int, machine_mode);
 static bool m68k_hard_regno_mode_ok (unsigned int, machine_mode);
+static bool m68k_hard_regno_scratch_ok (unsigned int);
 static bool m68k_modes_tieable_p (machine_mode, machine_mode);
 static bool m68k_can_change_mode_class (machine_mode, machine_mode,
 				       reg_class_t);
@@ -410,6 +411,8 @@ m68k_use_by_pieces_infrastructure_p (unsigned HOST_WIDE_INT size,
 #define TARGET_HARD_REGNO_NREGS m68k_hard_regno_nregs
 #undef TARGET_HARD_REGNO_MODE_OK
 #define TARGET_HARD_REGNO_MODE_OK m68k_hard_regno_mode_ok
+#undef TARGET_HARD_REGNO_SCRATCH_OK
+#define TARGET_HARD_REGNO_SCRATCH_OK m68k_hard_regno_scratch_ok
 
 #undef TARGET_MODES_TIEABLE_P
 #define TARGET_MODES_TIEABLE_P m68k_modes_tieable_p
@@ -5982,6 +5985,37 @@ m68k_struct_value_rtx (tree fntype ATTRIBUTE_UNUSED,
   return gen_rtx_REG (Pmode, M68K_STRUCT_VALUE_REGNUM);
 }
 
+/* True if REGNO is a call-saved integer register that the prologue does not
+   save.  Once reload has completed, the save mask is final, but a register
+   that the function only reads is still ever-live.  Passes that run later
+   assume that an ever-live call-saved register is saved, and must not write
+   one that is not.  Entry points and interrupt threads do not return to a
+   caller, so they save nothing by design.  */
+static bool
+m68k_unsaved_call_saved_reg_p (unsigned int regno)
+{
+  if (!reload_completed || regno >= 16 || call_used_or_fixed_reg_p (regno))
+    return false;
+  if (regno == FRAME_POINTER_REGNUM && frame_pointer_needed)
+    return false;
+
+  tree attrs = TYPE_ATTRIBUTES (TREE_TYPE (current_function_decl));
+  if (lookup_attribute ("entrypoint", attrs)
+      || (m68k_get_function_kind (current_function_decl)
+	  == m68k_fk_interrupt_thread))
+    return false;
+
+  m68k_compute_frame_layout ();
+  return !(current_frame.reg_mask & (1 << regno));
+}
+
+/* Implement TARGET_HARD_REGNO_SCRATCH_OK.  */
+static bool
+m68k_hard_regno_scratch_ok (unsigned int regno)
+{
+  return !m68k_unsaved_call_saved_reg_p (regno);
+}
+
 /* Return nonzero if register old_reg can be renamed to register new_reg.  */
 int
 m68k_hard_regno_rename_ok (unsigned int old_reg ATTRIBUTE_UNUSED,
@@ -5995,6 +6029,9 @@ m68k_hard_regno_rename_ok (unsigned int old_reg ATTRIBUTE_UNUSED,
   if ((m68k_get_function_kind (current_function_decl)
        == m68k_fk_interrupt_handler)
       && !df_regs_ever_live_p (new_reg))
+    return 0;
+
+  if (m68k_unsaved_call_saved_reg_p (new_reg))
     return 0;
 
   return 1;
