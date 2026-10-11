@@ -7566,29 +7566,103 @@ m68k_costs (rtx x,
 	    int *total,
 	    bool speed);
 
-/* Late combine can fold a two-byte MOVEQ plus a two-byte register AND
-   into a six-byte immediate AND after register allocation.  Use actual
-   size units for these positive small masks without changing the general
-   RTX costs used to allocate registers or the speed cost model.  */
+/* Estimate encoded words for integer operations whose assigned operands
+   determine their size.  Follow the same constant-materialization and
+   logical-immediate choices as the output routines.  This is independent
+   of the operating system and leaves memory addressing and relaxation
+   to the existing cost model.  */
+static int
+m68k_register_insn_words (rtx_insn *insn)
+{
+  rtx set = single_set (insn);
+  if (!set || GET_MODE (SET_DEST (set)) != SImode
+      || !DATA_REG_P (SET_DEST (set)))
+    return 0;
+
+  rtx src = SET_SRC (set);
+  if (CONST_INT_P (src))
+    switch (m68k_const_method (INTVAL (src)))
+      {
+      case MOVQ:
+	return 1;
+      case NOTB:
+      case NOTW:
+      case NEGW:
+      case SWAP:
+	return 2;
+      case MOVL:
+	return 3;
+      default:
+	return 0;
+      }
+
+  if (DATA_REG_P (src) || ADDRESS_REG_P (src))
+    return 1;
+  if ((GET_CODE (src) == NEG || GET_CODE (src) == NOT)
+      && DATA_REG_P (XEXP (src, 0))
+      && rtx_equal_p (SET_DEST (set), XEXP (src, 0)))
+    return 1;
+
+  rtx_code code = GET_CODE (src);
+  if (code != AND && code != IOR && code != XOR
+      && code != PLUS && code != MINUS)
+    return 0;
+  rtx lhs = XEXP (src, 0), rhs = XEXP (src, 1);
+  if (!DATA_REG_P (lhs) || !rtx_equal_p (SET_DEST (set), lhs))
+    return 0;
+  if (DATA_REG_P (rhs) || ((code == PLUS || code == MINUS)
+			 && ADDRESS_REG_P (rhs)))
+    return 1;
+  if (!CONST_INT_P (rhs))
+    return 0;
+
+  HOST_WIDE_INT value = INTVAL (rhs);
+  switch (code)
+    {
+    case AND:
+      if ((value | 0xffff) == -1)
+	return (value & 0xffff) == 0 ? 1 : 2;
+      if (exact_log2 (~value & 0xffffffff) >= 0)
+	return 2;
+      return 3;
+    case IOR:
+      if (value >> 16 == 0 || exact_log2 (value & 0xffffffff) >= 0)
+	return 2;
+      return 3;
+    case XOR:
+      if (value >> 16 == 0)
+	return value == 0xffff ? 1 : 2;
+      if (exact_log2 (value & 0xffffffff) >= 0)
+	return 2;
+      return 3;
+    case PLUS:
+      if (value == 0)
+	return 0;
+      if (IN_RANGE (value, -8, 8))
+	return 1;
+      if (TUNE_CPU32 && (IN_RANGE (value, 9, 16)
+			 || IN_RANGE (value, -16, -9)))
+	return 2;
+      return 3;
+    case MINUS:
+      if (value == 0)
+	return 0;
+      return IN_RANGE (value, 1, 8) ? 1 : 3;
+    default:
+      gcc_unreachable ();
+    }
+}
+
+/* Use these sizes after allocation, when physical register classes are
+   known.  Keep the existing speed and pre-allocation RTX cost policies.  */
 static int
 m68k_insn_cost (rtx_insn *insn, bool speed)
 {
-  if (TARGET_AMIGA && !TARGET_68020 && !TARGET_COLDFIRE
-      && reload_completed && !speed)
+  if (!TARGET_68020 && !TARGET_COLDFIRE && reload_completed && !speed)
     {
-      rtx set = single_set (insn);
-      if (set && GET_MODE (SET_DEST (set)) == SImode
-	  && DATA_REG_P (SET_DEST (set)))
-	{
-	  rtx src = SET_SRC (set);
-	  if (CONST_INT_P (src) && INTVAL (src) > 0 && INTVAL (src) <= 127)
-	    return COSTS_N_INSNS (1);
-	  if (GET_CODE (src) == AND && DATA_REG_P (XEXP (src, 0))
-	      && CONST_INT_P (XEXP (src, 1))
-	      && INTVAL (XEXP (src, 1)) > 0
-	      && INTVAL (XEXP (src, 1)) <= 127)
-	    return COSTS_N_INSNS (3);
-	}
+      int words = m68k_register_insn_words (insn);
+      if (words)
+	return COSTS_N_INSNS (words);
     }
   return pattern_cost (PATTERN (insn), speed);
 }
