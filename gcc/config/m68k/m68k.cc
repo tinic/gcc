@@ -1380,6 +1380,33 @@ m68k_use_return_insn (void)
   return current_frame.offset == 0;
 }
 
+/* Initially expose shrink-wrapping for ordinary non-PIC classic Amiga returns.
+   SIMPLE_RETURN is used on a path that has not executed the prologue.  */
+bool
+m68k_use_simple_return_insn (void)
+{
+  if (!TARGET_AMIGA || TARGET_68020 || TARGET_COLDFIRE
+      || !reload_completed || flag_pic || frame_pointer_needed
+      || crtl->args.pops_args || crtl->calls_eh_return || cfun->calls_alloca
+      || m68k_get_function_kind (current_function_decl)
+	 != m68k_fk_normal_function)
+    return false;
+
+#ifdef TARGET_STACKEXTEND
+  if (TARGET_STACKEXTEND)
+    return false;
+#endif
+
+  tree attrs = TYPE_ATTRIBUTES (TREE_TYPE (current_function_decl));
+  return !lookup_attribute ("saveds", attrs)
+	 && !lookup_attribute ("saveallregs", attrs)
+	 && !lookup_attribute ("entrypoint", attrs)
+	 && !lookup_attribute ("stackext", attrs)
+	 && !lookup_attribute ("interrupt", attrs)
+	 && !lookup_attribute ("interrupt_handler", attrs)
+	 && !lookup_attribute ("interrupt_thread", attrs);
+}
+
 /* Emit RTL for the "epilogue" or "sibcall_epilogue" define_expand;
    SIBCALL_P says which.
 
