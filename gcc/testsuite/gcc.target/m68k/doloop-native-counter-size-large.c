@@ -14,4 +14,5 @@ unsigned long at_limit_counter (const volatile unsigned char *p,
 }
 /* Retain a long counter with no proven bound or no headroom for a possible
    count increment in the preferred mode.  */
-/* { dg-final { scan-assembler-times "(clr\\.w|cmpa\\.w #-1)" 2 } } */
+/* { dg-final { scan-assembler-times "subq\\.l #1" 2 } } */
+/* { dg-final { scan-assembler-not "(dbra|clr\\.w)" } } */

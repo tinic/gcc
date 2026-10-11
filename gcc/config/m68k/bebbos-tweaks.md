@@ -87,6 +87,10 @@
   {
     if (ADDRESS_REG_P (operands[0]))
       return \"subq%.l #1,%0\;cmpa.w #-1,%0\;jne %l1\";
+    /* SUBQ sets C exactly when the full-width counter wraps.  For size,
+       avoid the low-word DBRA plus software high-word rollover. */
+    else if (optimize_size)
+      return \"subq%.l #1,%0\;jcc %l1\";
     else
       return \"dbra %0,%l1\;clr%.w %0\;subq%.l #1,%0\;jcc %l1\";
   }"
