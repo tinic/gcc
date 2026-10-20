@@ -18,6 +18,7 @@
 #include "cfghooks.h"
 #include "tree.h"
 #include "rtl.h"
+#include "flags.h"
 
 #define USE_MOVQ(i)	((unsigned) ((i) + 128) <= 255)
 
@@ -847,6 +848,18 @@ m68k_68000_10_costs_engine (rtx x, machine_mode mode, int outer_code,
         {
           rtx a = XEXP(x, 0);
           rtx b = XEXP(x, 1);
+
+          /* An immediate SI register shift by 1..8 is one instruction word
+             on the 68000 (including ADD.L for a left shift by one).  Its
+             encoded size does not grow with the shift count.  Keep the
+             existing timing model and all other targets/modes unchanged.  */
+          if (optimize_size && !speed && m68k_tune == u68000 && mode == SImode
+              && REG_P (a) && CONST_INT_P (b)
+              && INTVAL (b) >= 1 && INTVAL (b) <= 8)
+            {
+              *total = COSTS_N_INSNS (1);
+              return true;
+            }
 
           if (REG_P(a) || SUBREG_P(a)) {
 
