@@ -715,6 +715,18 @@ m68k_68000_10_costs_engine (rtx x, machine_mode mode, int outer_code,
           if (MEM_P(a))
             {
               rtx b = XEXP(a, 0);
+              if (optimize_size && !speed && m68k_tune == u68000)
+                {
+                  if (REG_P (b))
+                    { *total = COSTS_N_INSNS (1); return true; }
+                  if (GET_CODE (b) == PLUS && REG_P (XEXP (b, 0))
+                      && CONST_INT_P (XEXP (b, 1))
+                      && INTVAL (XEXP (b, 1)) >= -32768
+                      && INTVAL (XEXP (b, 1)) <= 32767)
+                    { *total = COSTS_N_INSNS (2); return true; }
+                  if (SYMBOL_REF_P (b))
+                    { *total = COSTS_N_INSNS (3); return true; }
+                }
               if (REG_P(b)) { *total = COST_CALL_OTHER + COST_TABLE[IDX_CALL_REG_OFFSET]; return true; }
               if (GET_CODE(b) == PLUS && REG_P(XEXP(b, 0))) { *total = COST_CALL_OTHER + COST_TABLE[IDX_CALL_PLUS_OFFSET]; return true; }
               else if (SYMBOL_REF_P(b) || GET_CODE(b) == CONST_INT) { *total = COST_CALL_OTHER + COST_TABLE[IDX_CALL_SYM_OFFSET]; return true; }
