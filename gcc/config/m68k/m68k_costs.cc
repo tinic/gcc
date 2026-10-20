@@ -697,6 +697,29 @@ const_int_cost (HOST_WIDE_INT i)
     }
 }
 
+/* HUNK_RELOC32 has one four-byte offset per absolute data reference.
+   Only charge definitely writable data in the ordinary absolute Amiga model;
+   constant pools, code labels, PC-relative and base-relative models differ.  */
+static int
+m68k_os_data_reloc_cost (rtx x, bool speed)
+{
+#ifdef TARGET_AMIGA
+  if (optimize_size && !speed && m68k_tune == u68000 && !flag_pic
+      && !TARGET_PCREL)
+    {
+      if (GET_CODE (x) == CONST && GET_CODE (XEXP (x, 0)) == PLUS
+          && CONST_INT_P (XEXP (XEXP (x, 0), 1)))
+        x = XEXP (XEXP (x, 0), 0);
+      if (SYMBOL_REF_P (x) && SYMBOL_REF_DECL (x)
+          && TREE_CODE (SYMBOL_REF_DECL (x)) == VAR_DECL
+          && !TREE_READONLY (SYMBOL_REF_DECL (x))
+          && !CONSTANT_POOL_ADDRESS_P (x))
+        return COSTS_N_INSNS (2);
+    }
+#endif
+  return 0;
+}
+
 /* ============================================
    SBF Engine (Fully table-driven)
    ============================================ */
@@ -762,7 +785,7 @@ m68k_68000_10_costs_engine (rtx x, machine_mode mode, int outer_code,
         return true;
       case SYMBOL_REF:
         if (COST_IS_UNDEFINED (IDX_SYMBOL)) return false;
-        *total = COST_SYMBOL;
+        *total = COST_SYMBOL + m68k_os_data_reloc_cost (x, speed);
         return true;
       case IF_THEN_ELSE:
         *total = 10;
@@ -799,7 +822,7 @@ m68k_68000_10_costs_engine (rtx x, machine_mode mode, int outer_code,
           rtx a = XEXP(x, 0);
           if (GET_CODE(a) == PLUS && SYMBOL_REF_P(XEXP(a,0)) && GET_CODE(XEXP(a, 1)) == CONST_INT) {
               if (COST_IS_UNDEFINED (IDX_SYMBOL)) return false;
-              *total = COST_SYMBOL;
+              *total = COST_SYMBOL + m68k_os_data_reloc_cost (x, speed);
               return true;
           }
           *total = 0;
@@ -1018,7 +1041,7 @@ m68k_68000_10_costs_engine (rtx x, machine_mode mode, int outer_code,
 
           if (GET_CODE(b) == SYMBOL_REF || (GET_CODE(b) == CONST && GET_CODE(XEXP(b,0)) == PLUS && GET_CODE(XEXP(XEXP(b,0),0)) == SYMBOL_REF)) {
               if (COST_IS_UNDEFINED (IDX_PLUS_OTHER)) return false;
-              *total = COST_PLUS_OTHER + 4;
+              *total = COST_PLUS_OTHER + 4 + m68k_os_data_reloc_cost (b, speed);
               return true;
           }
 
@@ -1093,7 +1116,7 @@ m68k_68000_10_costs_engine (rtx x, machine_mode mode, int outer_code,
             idx = IDX_MEM_PLUS_REG_REG;
 
           if (COST_IS_UNDEFINED (idx)) return false;
-          *total = COST_TABLE[idx];
+          *total = COST_TABLE[idx] + m68k_os_data_reloc_cost (y, speed);
           /* A nonzero d16 displacement adds an extension word over (An).  */
           if (optimize_size && !speed && m68k_tune == u68000
               && (mode == QImode || mode == HImode || mode == SImode)
