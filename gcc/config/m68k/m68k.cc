@@ -178,6 +178,7 @@ static bool m68k_save_reg (unsigned int regno, bool interrupt_handler);
 static bool m68k_ok_for_sibcall_p (tree, tree);
 static bool m68k_tls_symbol_p (rtx);
 static rtx m68k_legitimize_address (rtx, rtx, machine_mode);
+static void m68k_size_reorg (void);
 static bool m68k_rtx_costs (rtx, machine_mode, int, int, int *, bool);
 static int m68k_address_cost(rtx x, machine_mode mode, addr_space_t t, bool speed);
 static int m68k_callee_save_cost (spill_cost_type, unsigned int, machine_mode,
@@ -297,6 +298,9 @@ m68k_use_by_pieces_infrastructure_p (unsigned HOST_WIDE_INT size,
 #undef TARGET_SCHED_FIRST_CYCLE_MULTIPASS_DFA_LOOKAHEAD
 #define TARGET_SCHED_FIRST_CYCLE_MULTIPASS_DFA_LOOKAHEAD	\
   m68k_sched_first_cycle_multipass_dfa_lookahead
+
+#undef TARGET_MACHINE_DEPENDENT_REORG
+#define TARGET_MACHINE_DEPENDENT_REORG m68k_size_reorg
 
 #undef TARGET_OPTION_OVERRIDE
 #define TARGET_OPTION_OVERRIDE m68k_option_override
@@ -7543,4 +7547,54 @@ m68k_adjust_for_autoinc (rtx src, rtx dst, int delta)
       || !reg_mentioned_p (XEXP (a, 0), XEXP (src, 0)))
     return src;
   return replace_equiv_address_nv (src, plus_constant (Pmode, XEXP (src, 0), delta));
+}
+
+/* Ignore bookkeeping notes, but never look across an emitted section switch.  */
+static rtx_insn *
+m68k_size_neighbor (rtx_insn *insn, bool previous = false)
+{
+  while ((insn = previous ? PREV_INSN (insn) : NEXT_INSN (insn)))
+    {
+      if (NOTE_P (insn) && NOTE_KIND (insn) == NOTE_INSN_SWITCH_TEXT_SECTIONS)
+        return nullptr;
+      if (!NOTE_P (insn) && !DEBUG_INSN_P (insn))
+        return insn;
+    }
+  return nullptr;
+}
+
+/* Fold a late conditional branch around an unconditional branch.  The CFG
+   has already been freed here; keep this to adjacent, side-effect-free jumps
+   and let invert_jump maintain labels, recognition and branch probabilities.  */
+static void
+m68k_size_reorg (void)
+{
+  if (!optimize_size || m68k_tune != u68000)
+    return;
+
+  for (rtx_insn *insn = get_insns (); insn; insn = NEXT_INSN (insn))
+    {
+      if (!any_condjump_p (insn) || !onlyjump_p (insn)
+          || CROSSING_JUMP_P (insn)
+          || !JUMP_LABEL (insn) || !LABEL_P (JUMP_LABEL (insn)))
+        continue;
+      rtx_insn *jump = m68k_size_neighbor (insn);
+      if (!jump || !simplejump_p (jump) || CROSSING_JUMP_P (jump))
+        continue;
+      rtx_insn *barrier = m68k_size_neighbor (jump);
+      if (!barrier || !BARRIER_P (barrier))
+        continue;
+      rtx_insn *label = m68k_size_neighbor (barrier);
+      if (label != JUMP_LABEL (insn) || !JUMP_LABEL (jump)
+          || !LABEL_P (JUMP_LABEL (jump)) || JUMP_LABEL (jump) == label)
+        continue;
+      if (invert_jump (as_a <rtx_jump_insn *> (insn), JUMP_LABEL (jump), false))
+        {
+          if (dump_file)
+            fprintf (dump_file, "m68k-os: inverted adjacent branch pair %d/%d\n",
+                     INSN_UID (insn), INSN_UID (jump));
+          delete_insn (jump);
+          delete_insn (barrier);
+        }
+    }
 }
