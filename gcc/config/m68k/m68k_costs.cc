@@ -891,6 +891,12 @@ m68k_68000_10_costs_engine (rtx x, machine_mode mode, int outer_code,
         return m68k_68000_10_costs_engine (XEXP(x, 0), GET_MODE(XEXP(x, 0)), outer_code, 0, total, speed);
       case ZERO_EXTEND:
       case SIGN_EXTEND:
+        /* EXT.W and EXT.L each occupy one instruction word.  */
+        if (optimize_size && !speed && m68k_tune == u68000
+            && code == SIGN_EXTEND && REG_P (XEXP (x, 0))
+            && ((GET_MODE (XEXP (x, 0)) == QImode && mode == HImode)
+                || (GET_MODE (XEXP (x, 0)) == HImode && mode == SImode)))
+          { *total = COSTS_N_INSNS (1); return true; }
         if (GET_CODE (XEXP(x, 0)) == ZERO_EXTEND || GET_CODE (XEXP(x, 0)) == SIGN_EXTEND) return false;
         if (m68k_68000_10_costs_engine (XEXP(x, 0), GET_MODE(XEXP(x, 0)), outer_code, 0, total, speed)) {
             *total += COST_TABLE[IDX_EXTEND_EXTRA];
