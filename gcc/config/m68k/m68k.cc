@@ -7563,6 +7563,98 @@ m68k_size_neighbor (rtx_insn *insn, bool previous = false)
   return nullptr;
 }
 
+/* A small, bounds-checked switch can scale its HI index in HI mode and
+   address its table with a signed word index.  This removes a redundant
+   clearing of the index's high half.  Prove the original unsigned HI bound,
+   preserve the memory operand's attributes, and require the whole hard
+   register to die at the tablejump before discarding its high bits.  */
+static void
+m68k_shorten_switch_index (rtx_insn *mask)
+{
+  rtx set = single_set (mask);
+  if (!set || !REG_P (SET_DEST (set)) || GET_MODE (SET_DEST (set)) != SImode
+      || REGNO (SET_DEST (set)) >= 8)
+    return;
+  rtx reg = SET_DEST (set), src = SET_SRC (set);
+  if (GET_CODE (src) != AND || !rtx_equal_p (XEXP (src, 0), reg)
+      || !CONST_INT_P (XEXP (src, 1)) || INTVAL (XEXP (src, 1)) != 65535)
+    return;
+  rtx hi = gen_rtx_REG (HImode, REGNO (reg));
+  rtx_insn *bound = m68k_size_neighbor (mask, true);
+  if (!bound || !any_condjump_p (bound) || !onlyjump_p (bound))
+    return;
+  rtx pc = pc_set (bound);
+  rtx choice = SET_SRC (pc), cmp = XEXP (choice, 0);
+  if (GET_CODE (cmp) != GTU || !rtx_equal_p (XEXP (cmp, 0), hi)
+      || !CONST_INT_P (XEXP (cmp, 1)) || INTVAL (XEXP (cmp, 1)) < 0
+      || INTVAL (XEXP (cmp, 1)) > 16383
+      || GET_CODE (XEXP (choice, 1)) != LABEL_REF
+      || XEXP (choice, 2) != pc_rtx)
+    return;
+  HOST_WIDE_INT max_index = INTVAL (XEXP (cmp, 1));
+  rtx_insn *shift = m68k_size_neighbor (mask);
+  if (!shift || !NONJUMP_INSN_P (shift))
+    return;
+  rtx ss = single_set (shift);
+  if (!ss || !rtx_equal_p (SET_DEST (ss), reg)
+      || GET_CODE (SET_SRC (ss)) != ASHIFT
+      || !rtx_equal_p (XEXP (SET_SRC (ss), 0), reg)
+      || XEXP (SET_SRC (ss), 1) != const1_rtx)
+    return;
+  rtx_insn *load = m68k_size_neighbor (shift);
+  if (!load || !NONJUMP_INSN_P (load))
+    return;
+  rtx ls = single_set (load);
+  if (!ls || !rtx_equal_p (SET_DEST (ls), hi) || !MEM_P (SET_SRC (ls))
+      || GET_MODE (SET_SRC (ls)) != HImode)
+    return;
+  rtx mem = SET_SRC (ls), addr = XEXP (mem, 0);
+  if (GET_CODE (addr) != PLUS || !rtx_equal_p (XEXP (addr, 0), reg)
+      || GET_CODE (XEXP (addr, 1)) != LABEL_REF)
+    return;
+  rtx table_ref = XEXP (addr, 1);
+  rtx_insn *jump = m68k_size_neighbor (load);
+  int remaining = 4;
+  while (jump && NONJUMP_INSN_P (jump) && remaining-- > 0)
+    {
+      if (volatile_insn_p (PATTERN (jump))
+          || reg_overlap_mentioned_p (reg, PATTERN (jump)))
+        return;
+      jump = m68k_size_neighbor (jump);
+    }
+  if (!jump || !JUMP_P (jump)
+      || !find_regno_note (jump, REG_DEAD, REGNO (reg)))
+    return;
+  rtx_insn *table_label;
+  rtx_jump_table_data *table;
+  if (!tablejump_p (jump, &table_label, &table)
+      || table_label != XEXP (table_ref, 0))
+    return;
+  rtx jset = pc_set (jump);
+  if (!jset || GET_CODE (SET_SRC (jset)) != PLUS
+      || XEXP (SET_SRC (jset), 0) != pc_rtx)
+    return;
+  rtx offset = XEXP (SET_SRC (jset), 1);
+  if (GET_CODE (offset) != SIGN_EXTEND
+      || !rtx_equal_p (XEXP (offset, 0), hi)
+      || GET_CODE (PATTERN (table)) != ADDR_DIFF_VEC
+      || max_index >= XVECLEN (PATTERN (table), 1))
+    return;
+
+  rtx new_shift = gen_rtx_SET (hi, gen_rtx_ASHIFT (HImode, hi, const1_rtx));
+  rtx new_addr = gen_rtx_PLUS (SImode, gen_rtx_SIGN_EXTEND (SImode, hi),
+                             copy_rtx (table_ref));
+  validate_change (shift, &PATTERN (shift), new_shift, true);
+  validate_change (load, &SET_SRC (ls), replace_equiv_address_nv (mem, new_addr), true);
+  if (apply_change_group ())
+    {
+      if (dump_file)
+        fprintf (dump_file, "m68k-os: shortened bounded switch index %d\n",
+                 INSN_UID (mask));
+      delete_insn (mask);
+    }
+}
+
 /* Fold a late conditional branch around an unconditional branch.  The CFG
    has already been freed here; keep this to adjacent, side-effect-free jumps
    and let invert_jump maintain labels, recognition and branch probabilities.  */
@@ -7574,6 +7666,15 @@ m68k_size_reorg (void)
 
   for (rtx_insn *insn = get_insns (); insn; insn = NEXT_INSN (insn))
     {
+      if (NONJUMP_INSN_P (insn))
+        {
+          rtx_insn *previous = PREV_INSN (insn);
+          m68k_shorten_switch_index (insn);
+          /* The matched mask may have been deleted.  Resume at its old
+             predecessor so the loop increment uses the live chain.  */
+          if (insn->deleted ())
+            { insn = previous; continue; }
+        }
       if (!any_condjump_p (insn) || !onlyjump_p (insn)
           || CROSSING_JUMP_P (insn)
           || !JUMP_LABEL (insn) || !LABEL_P (JUMP_LABEL (insn)))
