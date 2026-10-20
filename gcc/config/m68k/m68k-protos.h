@@ -42,6 +42,7 @@ extern const char *output_andsi3 (rtx *);
 extern const char *output_iorsi3 (rtx *);
 extern const char *output_xorsi3 (rtx *);
 extern const char *output_call (rtx);
+extern bool m68k_os_postinc_copy (rtx *, int);
 extern const char *output_sibcall (rtx);
 extern void m68k_init_cc ();
 extern void output_dbcc_and_branch (rtx *, rtx_code);
