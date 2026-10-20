@@ -7655,47 +7655,18 @@ m68k_shorten_switch_index (rtx_insn *mask)
     }
 }
 
-/* Fold a late conditional branch around an unconditional branch.  The CFG
-   has already been freed here; keep this to adjacent, side-effect-free jumps
-   and let invert_jump maintain labels, recognition and branch probabilities.  */
+/* Apply the bounds/liveness-proved switch rewrite after register allocation.  */
 static void
 m68k_size_reorg (void)
 {
   if (!optimize_size || m68k_tune != u68000)
     return;
-
   for (rtx_insn *insn = get_insns (); insn; insn = NEXT_INSN (insn))
-    {
-      if (NONJUMP_INSN_P (insn))
-        {
-          rtx_insn *previous = PREV_INSN (insn);
-          m68k_shorten_switch_index (insn);
-          /* The matched mask may have been deleted.  Resume at its old
-             predecessor so the loop increment uses the live chain.  */
-          if (insn->deleted ())
-            { insn = previous; continue; }
-        }
-      if (!any_condjump_p (insn) || !onlyjump_p (insn)
-          || CROSSING_JUMP_P (insn)
-          || !JUMP_LABEL (insn) || !LABEL_P (JUMP_LABEL (insn)))
-        continue;
-      rtx_insn *jump = m68k_size_neighbor (insn);
-      if (!jump || !simplejump_p (jump) || CROSSING_JUMP_P (jump))
-        continue;
-      rtx_insn *barrier = m68k_size_neighbor (jump);
-      if (!barrier || !BARRIER_P (barrier))
-        continue;
-      rtx_insn *label = m68k_size_neighbor (barrier);
-      if (label != JUMP_LABEL (insn) || !JUMP_LABEL (jump)
-          || !LABEL_P (JUMP_LABEL (jump)) || JUMP_LABEL (jump) == label)
-        continue;
-      if (invert_jump (as_a <rtx_jump_insn *> (insn), JUMP_LABEL (jump), false))
-        {
-          if (dump_file)
-            fprintf (dump_file, "m68k-os: inverted adjacent branch pair %d/%d\n",
-                     INSN_UID (insn), INSN_UID (jump));
-          delete_insn (jump);
-          delete_insn (barrier);
-        }
-    }
+    if (NONJUMP_INSN_P (insn))
+      {
+        rtx_insn *previous = PREV_INSN (insn);
+        m68k_shorten_switch_index (insn);
+        if (insn->deleted ())
+          insn = previous;
+      }
 }
