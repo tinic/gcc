@@ -83,6 +83,8 @@
   {
     if (ADDRESS_REG_P (operands[0]))
       return \"subq%.l #1,%0\;cmpa.w #-1,%0\;jne %l1\";
+    else if (optimize_size && m68k_tune == u68000)
+      return \"subq%.l #1,%0\;jcc %l1\";
     else
       return \"dbra %0,%l1\;clr%.w %0\;subq%.l #1,%0\;jcc %l1\";
   }"
