@@ -994,7 +994,7 @@ extern enum M68K_SYMBOLIC_CALL m68k_symbolic_call_var;
 /* ??? HOST_WIDE_INT is not being defined for auto-generated files.
    Workaround that.  */
 #ifdef HOST_WIDE_INT
-typedef enum { MOVL, SWAP, NEGW, NOTW, NOTB, MOVQ, MVS, MVZ }
+typedef enum { MOVL, SWAP, NEGW, NOTW, NOTB, MOVQ, MVS, MVZ, MOVQ_LSL, MOVQ_LSR }
   M68K_CONST_METHOD;
 
 extern M68K_CONST_METHOD m68k_const_method (HOST_WIDE_INT);

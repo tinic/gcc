@@ -691,7 +691,7 @@ const_int_cost (HOST_WIDE_INT i)
   switch (m68k_const_method (i))
     {
     case MOVQ: return 0;
-    case MVZ: case MVS: case NOTB: case NOTW: case NEGW: case SWAP: return 1;
+    case MVZ: case MVS: case NOTB: case NOTW: case NEGW: case SWAP: case MOVQ_LSL: case MOVQ_LSR: return 1;
     case MOVL: return 2;
     default: gcc_unreachable ();
     }
@@ -1058,6 +1058,38 @@ m68k_68000_10_costs_engine (rtx x, machine_mode mode, int outer_code,
         {
           rtx a = XEXP(x, 0);
           rtx b = XEXP(x, 1);
+	  if (optimize_size && !speed && m68k_tune == u68000
+	      && mode == SImode && code == IOR)
+	    {
+	      rtx narrow = GET_CODE (a) == ZERO_EXTEND ? a
+		: GET_CODE (b) == ZERO_EXTEND ? b : NULL_RTX;
+	      rtx other = narrow == a ? b : a;
+	      if (narrow && REG_P (other))
+		{
+		  rtx src = XEXP (narrow, 0);
+		  if (GET_MODE (src) == QImode || GET_MODE (src) == HImode)
+		    {
+		      int words = 0;
+		      if (REG_P (src))
+			words = 1;
+		      else if (MEM_P (src))
+			{
+			  rtx addr = XEXP (src, 0);
+			  if (REG_P (addr) || GET_CODE (addr) == POST_INC
+			      || GET_CODE (addr) == PRE_DEC)
+			    words = 1;
+			  else if (GET_CODE (addr) == PLUS
+				   && REG_P (XEXP (addr, 0))
+				   && CONST_INT_P (XEXP (addr, 1))
+				   && IN_RANGE (INTVAL (XEXP (addr, 1)),
+						-32768, 32767))
+			    words = 2;
+			}
+		      if (words)
+			{ *total = COSTS_N_INSNS (words); return true; }
+		    }
+		}
+	    }
           if (GET_CODE(b) == CONST_INT) {
               if (REG_P(a)) {
                   if (COST_IS_UNDEFINED (IDX_LOGIC_REG_CONST)) return false;

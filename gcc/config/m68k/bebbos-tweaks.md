@@ -18,28 +18,26 @@
      This completely prevents the mode-mismatch ICE in patch_jump_insn. */
   if (GET_MODE (operands[0]) == HImode)
     {
-      emit_jump_insn (gen_rtx_PARALLEL (VOIDmode, gen_rtvec (3,
+      emit_jump_insn (gen_rtx_PARALLEL (VOIDmode, gen_rtvec (2,
 	gen_rtx_SET (pc_rtx,
 		     gen_rtx_IF_THEN_ELSE (VOIDmode,
 					   gen_rtx_NE (VOIDmode, operands[0], const0_rtx),
 					   gen_rtx_LABEL_REF (VOIDmode, operands[1]),
 					   pc_rtx)),
 	gen_rtx_SET (operands[0],
-		     gen_rtx_PLUS (HImode, operands[0], constm1_rtx)),
-	gen_rtx_CLOBBER (VOIDmode, gen_rtx_SCRATCH (HImode)))));
+		     gen_rtx_PLUS (HImode, operands[0], constm1_rtx)))));
       DONE;
     }
   else if (GET_MODE (operands[0]) == SImode)
     {
-      emit_jump_insn (gen_rtx_PARALLEL (VOIDmode, gen_rtvec (3,
+      emit_jump_insn (gen_rtx_PARALLEL (VOIDmode, gen_rtvec (2,
 	gen_rtx_SET (pc_rtx,
 		     gen_rtx_IF_THEN_ELSE (VOIDmode,
 					   gen_rtx_NE (VOIDmode, operands[0], const0_rtx),
 					   gen_rtx_LABEL_REF (VOIDmode, operands[1]),
 					   pc_rtx)),
 	gen_rtx_SET (operands[0],
-		     gen_rtx_PLUS (SImode, operands[0], constm1_rtx)),
-	gen_rtx_CLOBBER (VOIDmode, gen_rtx_SCRATCH (SImode)))));
+		     gen_rtx_PLUS (SImode, operands[0], constm1_rtx)))));
       DONE;
     }
   else
@@ -47,7 +45,7 @@
 })
 
 ;; =========================================================================
-;; MATCHING INSN PATTERNS (LRA SAFE, CLOBBER ASSIGNS DATA REGISTER)
+;; MATCHING INSN PATTERNS (NO UNUSED SCRATCH REGISTERS)
 ;; =========================================================================
 
 ;; 1. The native 16-Bit Loop
@@ -60,8 +58,7 @@
           (pc)))
    (set (match_dup 0)
         (plus:HI (match_dup 0)
-                 (const_int -1)))
-   (clobber (match_scratch:HI 2 "=&d"))]
+                 (const_int -1)))]
   ""
   "dbra %0,%l1"
   [(set_attr "type" "bcc")])
@@ -76,8 +73,7 @@
           (pc)))
    (set (match_dup 0)
         (plus:SI (match_dup 0)
-                 (const_int -1)))
-   (clobber (match_scratch:SI 2 "=&r"))]
+                 (const_int -1)))]
   ""
   "*
   {
