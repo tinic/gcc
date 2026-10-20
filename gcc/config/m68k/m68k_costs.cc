@@ -810,6 +810,23 @@ m68k_68000_10_costs_engine (rtx x, machine_mode mode, int outer_code,
           rtx a = XEXP(x, 0);
           rtx b = XEXP(x, 1);
 
+          /* A 16x16 -> 32 widening multiply is a hardware word multiply,
+             not the software long multiply.  This also supplies expmed's
+             widening-multiply estimate before constant synthesis.  */
+          if (optimize_size && !speed && m68k_tune == u68000 && mode == SImode
+              && (GET_CODE (a) == ZERO_EXTEND || GET_CODE (a) == SIGN_EXTEND)
+              && GET_MODE (XEXP (a, 0)) == HImode && REG_P (XEXP (a, 0)))
+            {
+              bool reg_operand = GET_CODE (b) == GET_CODE (a)
+                && GET_MODE (XEXP (b, 0)) == HImode && REG_P (XEXP (b, 0));
+              bool immediate = CONST_INT_P (b)
+                && (GET_CODE (a) == ZERO_EXTEND
+                    ? INTVAL (b) >= 0 && INTVAL (b) <= 65535
+                    : INTVAL (b) >= -32768 && INTVAL (b) <= 32767);
+              if (reg_operand || immediate)
+                { *total = COSTS_N_INSNS (immediate ? 2 : 1); return true; }
+            }
+
           if (GET_CODE(b) == CONST_INT)
             {
               int n = INTVAL(b);
