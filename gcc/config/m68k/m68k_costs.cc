@@ -759,6 +759,17 @@ m68k_68000_10_costs_engine (rtx x, machine_mode mode, int outer_code,
         {
           rtx a = XEXP(x, 0);
           rtx b = XEXP(x, 1);
+          /* CLR needs its opcode and effective address, no zero load.  */
+          if (optimize_size && !speed && m68k_tune == u68000
+              && MEM_P (a) && b == const0_rtx
+              && (GET_MODE (a) == QImode || GET_MODE (a) == HImode
+                  || GET_MODE (a) == SImode)
+              && m68k_68000_10_costs_engine (a, GET_MODE (a), SET, 0, total, speed))
+            {
+              if (GET_MODE (a) == SImode)
+                *total -= COST_TABLE[IDX_MEM_LONG_EXTRA];
+              return true;
+            }
           if (m68k_68000_10_costs_engine (a, mode, code, 0, total, speed)
               && m68k_68000_10_costs_engine (b, mode, code, 1, &total2, speed))
             {
