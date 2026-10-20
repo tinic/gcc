@@ -257,7 +257,10 @@ static int cost_size_68030[IDX_COUNT] = {
    ============================================ */
 static int cost_speed_68040[IDX_COUNT] = {
     [IDX_REG]                   = 20,
-    [IDX_MEM_PLUS_REG_DISP]     = 1,
+    /* At 3 or less, (d16,An) stack values get parked in address
+       registers and copied to data registers before each use: SHA-512
+       runs 8% slower than with the 68020 tables.  */
+    [IDX_MEM_PLUS_REG_DISP]     = 5,
     [IDX_MEM_PLUS_REG_REG]      = 5,
     [IDX_MEM_OTHER]             = 3,
     [IDX_CONST_INT_Q]           = 4,
@@ -442,7 +445,9 @@ m68k_select_cost_tables (void)
         active_speed = cost_speed_68030;
         active_size  = cost_size_68030;
       }
-    else if (m68k_tune == u68040)
+    /* The 68060 has no table of its own; its pipeline is closer to the
+       68040's than to the 68080's.  TUNE_68060 includes -m68020-60.  */
+    else if (m68k_tune == u68040 || TUNE_68060)
       {
         active_speed = cost_speed_68040;
         active_size  = cost_size_68040;
@@ -585,7 +590,7 @@ m68k_lsl_shift_per_step (void)
     if (TUNE_68000_10)                      return 2;
     if (m68k_tune == u68020 || m68k_tune == u68020_40) return 2;
     if (m68k_tune == u68030)                return 2;
-    if (m68k_tune == u68040)                return 0;
+    if (m68k_tune == u68040 || TUNE_68060)  return 0;
     return 1;                               /* 68080 */
 }
 
@@ -916,7 +921,7 @@ m68k_costs_engine (rtx x,
         if (TUNE_68000_10 || m68k_tune == u68020 || m68k_tune == u68020_40
             || m68k_tune == u68030)
             *total = GET_MODE_SIZE (mode) > 2 ? 260 : 0;
-        else if (m68k_tune == u68040)
+        else if (m68k_tune == u68040 || TUNE_68060)
             *total = GET_MODE_SIZE (mode) > 2 ? 38 : 44;
         else
             *total = GET_MODE_SIZE (mode) > 2 ? 6 : 4;
@@ -997,5 +1002,14 @@ m68k_costs (rtx x,
         initialized = true;
         m68k_init_costs (speed);
       }
-    return m68k_costs_engine (x, mode, outer_code, opno, total, speed);
+    bool done = m68k_costs_engine (x, mode, outer_code, opno, total, speed);
+
+    /* The cost tables describe one register-sized operation.  An integer
+       value wider than a word takes one per word; without this, lower-subreg
+       never finds it worth splitting DImode values.  FP modes live in a
+       single FPU register and are not scaled.  */
+    if (GET_MODE_CLASS (mode) == MODE_INT
+	&& GET_MODE_SIZE (mode) > UNITS_PER_WORD)
+      *total *= GET_MODE_SIZE (mode) / UNITS_PER_WORD;
+    return done;
 }

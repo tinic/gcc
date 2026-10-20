@@ -189,6 +189,15 @@ amiga_declare_object = 0
 
 #define JUMP_TABLES_IN_TEXT_SECTION 1
 
+/* EH data (.eh_frame, .gcc_except_table) is always absolute on AmigaOS.
+   m68k.h picks DW_EH_PE_pcrel (and indirect for globals) when flag_pic, which
+   -fbaserel, -fbaserel32, -resident and -resident32 set; but a PC-relative
+   reference from the except table to a typeinfo pointer in a data hunk
+   crosses hunks, which the hunk format cannot express ("reloc ... out of
+   range"). RELOC32 relocates an absolute pointer in every code model.  */
+#undef ASM_PREFERRED_EH_DATA_FORMAT
+#define ASM_PREFERRED_EH_DATA_FORMAT(CODE, GLOBAL) DW_EH_PE_absptr
+
 /* In m68k svr4, using swbeg is the standard way to do switch
    table.  */
 #undef ASM_OUTPUT_BEFORE_CASE_LABEL
@@ -390,8 +399,8 @@ extern const char *amigaos_crt_check (int argc, const char **argv);
       "%{!resident32:%{fbaserel32:nlbcrt0.o%s}" \
       "%{!fbaserel32:" \
       "%{!mcpu=68000:%{!mcpu=68010:"\
-	"%{!m68881:-u___cpucheck }"\
-	"%{m68881:-u___fpucheck }"\
+	"%{!m68881:%{!mhard-float:-u___cpucheck }}"\
+	"%{m68881|mhard-float:-u___fpucheck }"\
       "}} "\
       "%{resident:nrcrt0.o%s}" \
       "%{!resident:%{fbaserel:nbcrt0.o%s}" \
@@ -531,7 +540,7 @@ extern const char *amigaos_crt_check (int argc, const char **argv);
   "%{resident:-m amiga_bss -amiga-datadata-reloc -fl libb} " \
   "%{fbaserel32:%{!resident32:-m amiga_bss -fl libb32}} " \
   "%{resident32:-m amiga_bss -amiga-datadata-reloc -fl libb32} " \
-  "%{g:-amiga-debug-hunk} " \
+  "%{g*:%{%:debug-level-gt(0):-amiga-debug-hunk}} " \
   CRT_CHECK_SPEC \
   "%(link_cpu) "
 #endif
@@ -544,9 +553,14 @@ extern const char *amigaos_crt_check (int argc, const char **argv);
   "%{resident32:-fbaserel32} " \
   "%{msmall-code:-fno-function-cse}"
 
+/* The linker flavors pick the library variant in the C runtime trees the
+   driver only adds by their base directory (libnix, clib2, ixemul), so
+   they must follow the multilibs: a 68060 gets its own libraries, and
+   only an explicit -m68881 or -mhard-float means the hard-float ABI.  */
 #define LINK_CPU_SPEC \
-  "%{m6802*|mc6802*|m6803*|m6804*|m6806*|m6808*|mcpu=6802*|mcpu=6803*|mcpu=6804*|mcpu=6806*|mcpu=6808*:-fl libm020} " \
-  "%{mhard-float|m68881|mcpu=6804*|mcpu=6806*|mcpu=6808*:-fl libm881}"
+  "%{m6806*|mc6806*|mcpu=6806*|march=6806*:-fl libm060;" \
+  "m6802*|mc6802*|m6803*|m6804*|m6808*|mcpu=6802*|mcpu=6803*|mcpu=6804*|mcpu=6808*|march=6802*|march=6803*|march=6804*:-fl libm020} " \
+  "%{mhard-float|m68881:-fl libm881}"
 
 #ifdef TARGET_AMIGAOS_VASM
 #define LINK_COMMAND_SPEC \
