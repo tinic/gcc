@@ -1054,6 +1054,14 @@ m68k_68000_10_costs_engine (rtx x, machine_mode mode, int outer_code,
 
           if (COST_IS_UNDEFINED (idx)) return false;
           *total = COST_TABLE[idx];
+          /* A nonzero d16 displacement adds an extension word over (An).  */
+          if (optimize_size && !speed && m68k_tune == u68000
+              && (mode == QImode || mode == HImode || mode == SImode)
+              && yc == PLUS && REG_P (XEXP (y, 0))
+              && CONST_INT_P (XEXP (y, 1)) && INTVAL (XEXP (y, 1)) != 0
+              && INTVAL (XEXP (y, 1)) >= -32768
+              && INTVAL (XEXP (y, 1)) <= 32767)
+            *total += COSTS_N_INSNS (1);
           if (mode != QImode && mode != HImode)
             *total += COST_TABLE[IDX_MEM_LONG_EXTRA];
           if (opno && yc == PRE_DEC)
