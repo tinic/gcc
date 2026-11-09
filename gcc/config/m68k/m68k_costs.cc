@@ -808,6 +808,13 @@ m68k_costs_engine (rtx x,
                 break;
               }
 
+            case SYMBOL_REF:
+            case LABEL_REF:
+            case CONST:
+              *total = speed ? COST_MEM_OTHER
+                             : MAX (COST_MEM_PLUS_REG_DISP + 2, COST_MEM_OTHER);
+              break;
+
             default:
               *total = COST_MEM_OTHER;
               break;
