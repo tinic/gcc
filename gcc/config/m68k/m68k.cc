@@ -7887,21 +7887,22 @@ m68k_predict_doloop_p (class loop *loop)
 {
   /* Predict success for simple, predictable innermost loops so that IVOpts
      preserves the scalar loop counter instead of turning it into a pointer comparison. */
-  if (loop->inner == NULL)
-    return true;
+  if (loop->inner != NULL)
+    return false;
 
-  return false;
+  widest_int iterations_max;
+  if (!optimize_loop_for_speed_p (loop)
+      && (!get_max_loop_iterations (loop, &iterations_max)
+	  || !wi::ltu_p (iterations_max, 0xffff)))
+    return false;
+
+  return true;
 }
 
 static machine_mode
-m68k_preferred_doloop_mode (machine_mode mode)
+m68k_preferred_doloop_mode (machine_mode)
 {
-  /* dbra works on 16-bit (HImode) decrements natively, but if the loop count
-     is larger or already in SImode, SImode is fully supported by long-branch targets. */
-  if (mode == HImode || mode == QImode)
-    return HImode;
-
-  return SImode;
+  return HImode;
 }
 
 /* Adjust a source that is read after DST changes its address register.  */
