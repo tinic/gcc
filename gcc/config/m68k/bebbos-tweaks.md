@@ -21,7 +21,7 @@
      patch_jump_insn. */
   if (GET_MODE (operands[0]) == HImode)
     emit_jump_insn (gen_dbne_hi (operands[0], operands[1]));
-  else if (GET_MODE (operands[0]) == SImode)
+  else if (GET_MODE (operands[0]) == SImode && optimize_insn_for_speed_p ())
     emit_jump_insn (gen_dbne_si (operands[0], operands[1]));
   else
     FAIL;
