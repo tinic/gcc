@@ -45,6 +45,7 @@ extern const char *output_xorsi3 (rtx *);
 extern const char *output_call (rtx);
 extern const char *output_sibcall (rtx);
 extern void m68k_init_cc ();
+extern bool m68k_use_dreg_for_areg_tst_p (rtx_insn *, rtx);
 extern void output_dbcc_and_branch (rtx *, rtx_code);
 extern rtx_code m68k_output_compare_di (rtx, rtx, rtx, rtx, rtx_insn *, rtx_code);
 extern rtx_code m68k_output_compare_si (rtx, rtx, rtx_code);

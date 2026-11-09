@@ -944,6 +944,9 @@ m68k_costs_engine (rtx x,
       case GTU:
       case GEU:
         *total = COST_BRANCH;
+        if (!TARGET_68020 && !TARGET_COLDFIRE
+            && ADDRESS_REG_P (XEXP (x, 0)) && XEXP (x, 1) == const0_rtx)
+          *total += COST_SET_REG_REG + 2;
         return true;
 
       case SET:

@@ -1978,12 +1978,31 @@ m68k_init_cc ()
 /* Update flags for a move operation with OPERANDS.  Called for move
    operations where attr_flags_valid returns "set".  */
 
+bool
+m68k_use_dreg_for_areg_tst_p (rtx_insn *insn, rtx reg)
+{
+  rtx_insn *prev = prev_nonnote_nondebug_insn (insn);
+  if (!prev || !NONJUMP_INSN_P (prev))
+    return true;
+  rtx set = single_set (prev);
+  if (!set)
+    return true;
+  if (rtx_equal_p (SET_DEST (set), reg) && DATA_REG_P (SET_SRC (set)))
+    return false;
+  if ((DATA_REG_P (SET_DEST (set)) || MEM_P (SET_DEST (set)))
+      && !side_effects_p (SET_DEST (set))
+      && !modified_in_p (reg, prev)
+      && rtx_equal_p (SET_SRC (set), reg))
+    return false;
+  return true;
+}
+
 static void
 handle_flags_for_move (rtx *operands)
 {
-  flags_compare_op0 = flags_compare_op1 = NULL_RTX;
   if (!ADDRESS_REG_P (operands[0]))
     {
+      flags_compare_op0 = flags_compare_op1 = NULL_RTX;
       flags_valid = FLAGS_VALID_MOVE;
       flags_operand1 = side_effects_p (operands[0]) ? NULL_RTX : operands[0];
       if (side_effects_p (operands[1])
@@ -1997,12 +2016,50 @@ handle_flags_for_move (rtx *operands)
 	flags_operand2 = operands[1];
       return;
     }
+  if (TARGET_COLDFIRE && CONST_INT_P (operands[1])
+      && valid_mov3q_const (INTVAL (operands[1])))
+    {
+      m68k_init_cc ();
+      return;
+    }
+  if (flags_compare_op0 != NULL_RTX && flags_compare_op1 == const0_rtx
+      && GET_MODE (flags_compare_op0) == SImode
+      && REG_P (operands[1]) && rtx_equal_p (operands[1], flags_compare_op0))
+    {
+      flags_valid = FLAGS_VALID_MOVE;
+      flags_operand1 = flags_compare_op0;
+      flags_operand2 = operands[0];
+      flags_compare_op0 = flags_compare_op1 = NULL_RTX;
+      return;
+    }
+  if (flags_compare_op0 != NULL_RTX
+      && (modified_in_p (flags_compare_op0, current_output_insn)
+	  || modified_in_p (flags_compare_op1, current_output_insn)))
+    flags_compare_op0 = flags_compare_op1 = NULL_RTX;
+  bool match_src = (flags_valid != FLAGS_VALID_NO
+		    && GET_MODE (operands[0]) == SImode
+		    && GET_CODE (operands[1]) != SYMBOL_REF
+		    && GET_CODE (operands[1]) != CONST
+		    && !CONST_INT_P (operands[1])
+		    && !side_effects_p (operands[1])
+		    && !modified_in_p (operands[1], current_output_insn)
+		    && ((flags_operand1 != NULL_RTX
+			 && rtx_equal_p (operands[1], flags_operand1))
+			|| (flags_operand2 != NULL_RTX
+			    && rtx_equal_p (operands[1], flags_operand2))));
   if (flags_operand1 != NULL_RTX
       && modified_in_p (flags_operand1, current_output_insn))
     flags_operand1 = NULL_RTX;
   if (flags_operand2 != NULL_RTX
       && modified_in_p (flags_operand2, current_output_insn))
     flags_operand2 = NULL_RTX;
+  if (match_src)
+    {
+      if (flags_operand1 == NULL_RTX)
+	flags_operand1 = operands[0];
+      else if (flags_operand2 == NULL_RTX || !REG_P (flags_operand2))
+	flags_operand2 = operands[0];
+    }
 }
 
 /* Process INSN to remember flag operands if possible.  */
