@@ -5984,6 +5984,12 @@ output_andsi3 (rtx *operands)
 	  || offsettable_memref_p (operands[0]))
       && !TARGET_COLDFIRE)
     {
+      if ((INTVAL (operands[2]) & 0xffff) == 0xff00)
+	{
+	  if (GET_CODE (operands[0]) != REG)
+	    operands[0] = adjust_address (operands[0], QImode, 3);
+	  return "clr%.b %0";
+	}
       if (GET_CODE (operands[0]) != REG)
         operands[0] = adjust_address (operands[0], HImode, 2);
       operands[2] = GEN_INT (INTVAL (operands[2]) & 0xffff);
