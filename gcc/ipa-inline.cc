@@ -536,7 +536,7 @@ inline_saves_costly_p (cgraph_edge *e, cgraph_node *caller,
 {
   /* An alias has no summary and not the attributes of its target.  */
   callee = callee->ultimate_alias_target ();
-  if (!param_inline_early_return_saves
+  if (!opt_for_fn (caller->decl, param_inline_early_return_saves)
       || !targetm.target_option.ipa_call_save_cost || !in_lto_p
       || !caller->address_taken || caller->count.quality () >= AFDO
       || DECL_DECLARED_INLINE_P (callee->decl)

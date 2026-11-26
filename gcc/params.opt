@@ -234,7 +234,7 @@ Common Joined UInteger Var(param_hot_bb_frequency_fraction) Init(1000) Param
 The denominator n of fraction 1/n of the execution frequency of the entry block of a function that a basic block of this function needs to at least have in order to be considered hot.
 
 -param=inline-early-return-saves=
-Common Joined UInteger Var(param_inline_early_return_saves) Init(1) IntegerRange(0, 1) Param
+Common Joined UInteger Var(param_inline_early_return_saves) Init(1) IntegerRange(0, 1) Param Optimization
 Let the inliner keep a call out of line where the target says that inlining adds register saves to a path that bypasses the call.
 
 -param=inline-heuristics-hint-percent=
