@@ -7030,6 +7030,13 @@ and its outgoing call edges before LTO inlining.",
  void, (cgraph_node *node), NULL)
 
 DEFHOOK
+(analyze_bb_call_saves,
+ "Store in @var{saves}, indexed by basic block, the target's estimate of\n\
+the call-preserved registers that each block of the current function\n\
+needs.  The array has @code{last_basic_block_for_fn (cfun)} elements.",
+ void, (unsigned char *saves), NULL)
+
+DEFHOOK
 (ipa_call_save_cost,
  "Return the cost of additional unconditional register saves and restores\n\
 if a function using @var{callee} preserved registers is inlined into one\n\

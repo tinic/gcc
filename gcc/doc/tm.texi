@@ -11080,6 +11080,12 @@ Record target estimates of call-preserved register use for @var{node}
 and its outgoing call edges before LTO inlining.
 @end deftypefn
 
+@deftypefn {Target Hook} void TARGET_ANALYZE_BB_CALL_SAVES (unsigned char *@var{saves})
+Store in @var{saves}, indexed by basic block, the target's estimate of
+the call-preserved registers that each block of the current function
+needs.  The array has @code{last_basic_block_for_fn (cfun)} elements.
+@end deftypefn
+
 @deftypefn {Target Hook} {unsigned int} TARGET_IPA_CALL_SAVE_COST (unsigned int @var{caller}, unsigned int @var{callee}, unsigned int @var{live})
 Return the cost of additional unconditional register saves and restores
 if a function using @var{callee} preserved registers is inlined into one

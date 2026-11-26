@@ -85,6 +85,7 @@ along with GCC; see the file COPYING3.  If not see
 #include "alloc-pool.h"
 #include "tree-pass.h"
 #include "stor-layout.h"
+#include "target.h"
 #include "ssa.h"
 #include "cgraph.h"
 #include "diagnostic.h"
@@ -197,6 +198,10 @@ test_nonssa_use (gimple *, tree t, tree, void *data)
    to give the part of a function that returns early its own registers:
    see pass_late_split_functions.  */
 static bool late_split_p;
+
+/* In the late run: the target's estimate of the call-preserved registers
+   each block needs, or empty if the target gives none.  */
+static vec<unsigned char> bb_call_saves;
 
 /* Dump split point CURRENT.  */
 
@@ -571,6 +576,34 @@ consider_split (class split_point *current, bitmap non_ssa_vars,
   /* FIXME: The logic here is not very precise, because inliner does use
      inline predicates to reduce function body size.  We add 10 to anticipate
      that.  Next stage1 we should try to be more meaningful here.  */
+  /* The late run moves a part out when that takes register saves off the
+     paths that do not reach it.  The rule is the one the inliner uses for
+     a call in a callback: the saves the part adds, on the entries that do
+     not reach it, against a call and return on the entries that do.  */
+  if (late_split_p && param_late_split_functions == 1)
+    {
+      unsigned header_saves = 0, part_saves = 0;
+      basic_block sbb;
+      if (bb_call_saves.is_empty ()
+	  || !targetm.target_option.ipa_call_save_cost)
+	return;
+      FOR_EACH_BB_FN (sbb, cfun)
+	if (bitmap_bit_p (current->split_bbs, sbb->index))
+	  part_saves = MAX (part_saves, bb_call_saves[sbb->index]);
+	else
+	  header_saves = MAX (header_saves, bb_call_saves[sbb->index]);
+      unsigned cost = targetm.target_option.ipa_call_save_cost
+	(header_saves, part_saves, 0);
+      sreal freq = current->count.to_sreal_scale
+	(ENTRY_BLOCK_PTR_FOR_FN (cfun)->count);
+      bool worth = cost && freq < 1 && (sreal (1) - freq) * cost > freq * 100;
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	fprintf (dump_file, "  Late split: saves %u -> %u cost %u freq %.3f%s\n",
+		 header_saves, part_saves, cost, freq.to_double (),
+		 worth ? "" : " refused");
+      if (!worth)
+	return;
+    }
   /* After inlining the header does not have to fit a caller.  The part
      must be worth a function of its own.  */
   if (late_split_p
@@ -2012,6 +2045,12 @@ execute_split_functions (void)
      then inlining would still benefit.  */
   if (late_split_p && node->split_part)
     return 0;
+  bb_call_saves.truncate (0);
+  if (late_split_p && targetm.target_option.analyze_bb_call_saves)
+    {
+      bb_call_saves.safe_grow_cleared (last_basic_block_for_fn (cfun));
+      targetm.target_option.analyze_bb_call_saves (bb_call_saves.address ());
+    }
 
   if (!late_split_p
       && (!node->callers

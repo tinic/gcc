@@ -502,9 +502,12 @@ static HOST_WIDE_INT m68k_shrink_wrap_prologue_sp_adjust (void);
   m68k_shrink_wrap_prologue_sp_adjust
 static void m68k_analyze_ipa_call_saves (cgraph_node *);
 static unsigned m68k_ipa_call_save_cost (unsigned, unsigned, unsigned);
+static void m68k_analyze_bb_call_saves (unsigned char *);
 
 #undef TARGET_ANALYZE_IPA_CALL_SAVES
 #define TARGET_ANALYZE_IPA_CALL_SAVES m68k_analyze_ipa_call_saves
+#undef TARGET_ANALYZE_BB_CALL_SAVES
+#define TARGET_ANALYZE_BB_CALL_SAVES m68k_analyze_bb_call_saves
 #undef TARGET_IPA_CALL_SAVE_COST
 #define TARGET_IPA_CALL_SAVE_COST m68k_ipa_call_save_cost
 
@@ -1515,6 +1518,94 @@ m68k_analyze_ipa_call_saves (cgraph_node *node)
       || lookup_attribute ("saveallregs", attrs))
     fast = false;
   info->call_free_return = fast;
+}
+
+/* Implement TARGET_ANALYZE_BB_CALL_SAVES: the estimate of
+   m68k_analyze_ipa_call_saves for each block.  */
+static void
+m68k_analyze_bb_call_saves (unsigned char *saves)
+{
+  if (TARGET_COLDFIRE || !m68k_ipa_callback_saves)
+    return;
+  unsigned total = 0;
+  function *fun = cfun;
+  unsigned data_scratch = 0, addr_scratch = 0;
+  for (unsigned reg = D0_REG; reg < SP_REG; ++reg)
+    if (!fixed_regs[reg] && this_target_hard_regs->x_call_used_regs[reg])
+      {
+	if (reg < A0_REG)
+	  ++data_scratch;
+	else
+	  ++addr_scratch;
+      }
+  unsigned peak = 0;
+  (void) total;
+  var_map map = init_var_map (num_ssa_names);
+  tree_live_info_p ranges = calculate_live_ranges (map, false);
+  auto_bitmap calls, seen;
+  basic_block bb;
+  FOR_EACH_BB_FN (bb, fun)
+    {
+      peak = 0;
+      auto_bitmap live;
+      unsigned int data = 0, addr = 0;
+      auto account = [&] (tree name, bool add)
+	{
+	  if (virtual_operand_p (name))
+	    return;
+	  bool pointer = POINTER_TYPE_P (TREE_TYPE (name));
+	  /* Without an FPU a floating-point value is in data registers.  */
+	  if (!pointer && !INTEGRAL_TYPE_P (TREE_TYPE (name))
+	      && !(!TARGET_HARD_FLOAT
+		   && SCALAR_FLOAT_TYPE_P (TREE_TYPE (name))))
+	    return;
+	  unsigned id = SSA_NAME_VERSION (name);
+	  unsigned &n = pointer ? addr : data;
+	  unsigned bits = TYPE_PRECISION (TREE_TYPE (name));
+	  unsigned words = MIN (2U, (bits + 31U) / 32U);
+	  if (add && bitmap_set_bit (live, id))
+	    n += words;
+	  else if (!add && bitmap_clear_bit (live, id))
+	    n -= words;
+	};
+      unsigned part;
+      bitmap_iterator bi;
+      EXECUTE_IF_SET_IN_BITMAP (live_on_exit (ranges, bb), 0, part, bi)
+	account (partition_to_var (map, part), true);
+      auto sample = [&] ()
+	{
+	  unsigned excess = (data > data_scratch ? data - data_scratch : 0)
+			    + (addr > addr_scratch ? addr - addr_scratch : 0);
+	  peak = MAX (peak, excess);
+	};
+      /* The end of the block: a block can have no statement, and its last
+	 statement can set a value that is live on exit.  */
+      sample ();
+      for (gimple_stmt_iterator i = gsi_last_bb (bb); !gsi_end_p (i);
+	   gsi_prev (&i))
+	{
+	  gimple *stmt = gsi_stmt (i);
+	  if (is_gimple_debug (stmt))
+	    continue;
+	  tree name;
+	  ssa_op_iter iter;
+	  FOR_EACH_SSA_TREE_OPERAND (name, stmt, iter, SSA_OP_DEF)
+	    account (name, false);
+	  if (is_gimple_call (stmt) && !gimple_call_internal_p (stmt)
+	      && !(gimple_call_builtin_p (stmt, BUILT_IN_NORMAL)
+		   && is_inexpensive_builtin (gimple_call_fndecl (stmt))))
+	    {
+	      bitmap_set_bit (calls, bb->index);
+	      peak = MAX (peak, data + addr);
+	    }
+	  FOR_EACH_SSA_TREE_OPERAND (name, stmt, iter, SSA_OP_USE)
+	    account (name, true);
+	  sample ();
+	}
+      saves[bb->index] = MIN (peak, 11U);
+    }
+  delete_tree_live_info (ranges);
+  delete_var_map (map);
 }
 
 /* Implement TARGET_IPA_CALL_SAVE_COST.  The unit is 1/100 of a call and
