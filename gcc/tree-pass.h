@@ -497,6 +497,7 @@ extern gimple_opt_pass *make_pass_tm_memopt (gcc::context *ctxt);
 extern gimple_opt_pass *make_pass_tm_edges (gcc::context *ctxt);
 extern gimple_opt_pass *make_pass_split_functions (gcc::context *ctxt);
 extern gimple_opt_pass *make_pass_feedback_split_functions (gcc::context *ctxt);
+extern gimple_opt_pass *make_pass_late_split_functions (gcc::context *ctxt);
 extern gimple_opt_pass *make_pass_strength_reduction (gcc::context *ctxt);
 extern gimple_opt_pass *make_pass_vtable_verify (gcc::context *ctxt);
 extern gimple_opt_pass *make_pass_ubsan (gcc::context *ctxt);

@@ -405,6 +405,14 @@ The size of L1 cache.
 Common Joined UInteger Var(param_l2_cache_size) Init(512) Param Optimization
 The size of L2 cache.
 
+-param=late-split-functions=
+Common Joined UInteger Var(param_late_split_functions) Init(0) IntegerRange(0, 1) Param Optimization
+Run the function splitter again after whole-program inlining.
+
+-param=late-split-min-size=
+Common Joined UInteger Var(param_late_split_min_size) Init(30) Param Optimization
+The smallest part that the late run of the function splitter moves out.
+
 -param=large-function-growth=
 Common Joined UInteger Var(param_large_function_growth) Optimization Init(100) Param
 Maximal growth due to inlining of large function (as a percentage).

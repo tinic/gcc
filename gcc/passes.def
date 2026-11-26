@@ -208,6 +208,7 @@ along with GCC; see the file COPYING3.  If not see
   NEXT_PASS (pass_harden_control_flow_redundancy);
   NEXT_PASS (pass_all_optimizations);
   PUSH_INSERT_PASSES_WITHIN (pass_all_optimizations)
+      NEXT_PASS (pass_late_split_functions);
       NEXT_PASS (pass_remove_cgraph_callee_edges);
       /* Initial scalar cleanups before alias computation.
 	 They ensure memory accesses are not indirect wherever possible.  */

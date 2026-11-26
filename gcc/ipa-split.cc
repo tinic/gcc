@@ -192,6 +192,11 @@ test_nonssa_use (gimple *, tree t, tree, void *data)
   return false;
 }
 
+/* True in the run of the pass after IPA inlining.  There the purpose is
+   to give the part of a function that returns early its own registers:
+   see pass_late_split_functions.  */
+static bool late_split_p;
+
 /* Dump split point CURRENT.  */
 
 static void
@@ -564,7 +569,17 @@ consider_split (class split_point *current, bitmap non_ssa_vars,
   /* FIXME: The logic here is not very precise, because inliner does use
      inline predicates to reduce function body size.  We add 10 to anticipate
      that.  Next stage1 we should try to be more meaningful here.  */
-  if (current->header_size + call_overhead
+  /* After inlining the header does not have to fit a caller.  The part
+     must be worth a function of its own.  */
+  if (late_split_p
+      && current->split_size < (unsigned) param_late_split_min_size)
+    {
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	fprintf (dump_file, "  Refused: split part is small\n");
+      return;
+    }
+  if (!late_split_p
+      && current->header_size + call_overhead
       >= (unsigned int)(DECL_DECLARED_INLINE_P (current_function_decl)
 			? param_max_inline_insns_single
 			: param_max_inline_insns_auto) + 10)
@@ -1380,6 +1395,12 @@ split_function (basic_block return_bb, class split_point *split_point,
      split_point->split_bbs, split_point->entry_bb, "part");
   delete adjustments;
   node->split_part = true;
+  if (late_split_p)
+    {
+      /* No inliner runs after this; compile the part as a function.  */
+      DECL_UNINLINABLE (node->decl) = 1;
+      cgraph_new_nodes.safe_push (node);
+    }
 
   if (cur_node->same_comdat_group)
     {
@@ -1768,7 +1789,8 @@ split_function (basic_block return_bb, class split_point *split_point,
     }
   free_dominance_info (CDI_DOMINATORS);
   free_dominance_info (CDI_POST_DOMINATORS);
-  compute_fn_summary (node, true);
+  if (!late_split_p)
+    compute_fn_summary (node, true);
 }
 
 /* Execute function splitting pass.  */
@@ -1844,7 +1866,11 @@ execute_split_functions (void)
      Note that we are not completely conservative about disqualifying functions
      called once.  It is possible that the caller is called more then once and
      then inlining would still benefit.  */
-  if ((!node->callers
+  if (late_split_p && node->split_part)
+    return 0;
+
+  if (!late_split_p
+      && (!node->callers
        /* Local functions called once will be completely inlined most of time.  */
        || (!node->callers->next_caller && node->local))
       && !node->address_taken
@@ -1858,7 +1884,8 @@ execute_split_functions (void)
     }
 
   /* FIXME: We can actually split if splitting reduces call overhead.  */
-  if (!flag_inline_small_functions
+  if (!late_split_p
+      && !flag_inline_small_functions
       && !DECL_DECLARED_INLINE_P (current_function_decl))
     {
       if (dump_file)
@@ -2079,4 +2106,54 @@ gimple_opt_pass *
 make_pass_feedback_split_functions (gcc::context *ctxt)
 {
   return new pass_feedback_split_functions (ctxt);
+}
+
+/* The splitter after IPA inlining.  Whole-program inlining can merge a
+   large body into the conditional part of a small function.  The merged
+   function then saves all the registers of that body on every call.  Move
+   the part back out so the rest keeps a small prologue.  */
+
+namespace {
+
+const pass_data pass_data_late_split_functions =
+{
+  GIMPLE_PASS, /* type */
+  "lsplit", /* name */
+  OPTGROUP_NONE, /* optinfo_flags */
+  TV_IPA_FNSPLIT, /* tv_id */
+  PROP_cfg, /* properties_required */
+  0, /* properties_provided */
+  0, /* properties_destroyed */
+  0, /* todo_flags_start */
+  0, /* todo_flags_finish */
+};
+
+class pass_late_split_functions : public gimple_opt_pass
+{
+public:
+  pass_late_split_functions (gcc::context *ctxt)
+    : gimple_opt_pass (pass_data_late_split_functions, ctxt)
+  {}
+
+  bool gate (function *) final override
+    {
+      return flag_partial_inlining && param_late_split_functions;
+    }
+  unsigned int execute (function *) final override
+    {
+      late_split_p = true;
+      unsigned int todo = execute_split_functions ();
+      late_split_p = false;
+      if (todo)
+	todo |= TODO_rebuild_cgraph_edges;
+      return todo;
+    }
+}; // class pass_late_split_functions
+
+} // anon namespace
+
+gimple_opt_pass *
+make_pass_late_split_functions (gcc::context *ctxt)
+{
+  return new pass_late_split_functions (ctxt);
 }
