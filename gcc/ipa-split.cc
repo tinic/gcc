@@ -580,7 +580,7 @@ consider_split (class split_point *current, bitmap non_ssa_vars,
      paths that do not reach it.  The rule is the one the inliner uses for
      a call in a callback: the saves the part adds, on the entries that do
      not reach it, against a call and return on the entries that do.  */
-  if (late_split_p && param_late_split_functions == 1)
+  if (late_split_p && param_late_split_functions != 2)
     {
       unsigned header_saves = 0, part_saves = 0;
       basic_block sbb;
@@ -2044,6 +2044,11 @@ execute_split_functions (void)
      called once.  It is possible that the caller is called more then once and
      then inlining would still benefit.  */
   if (late_split_p && node->split_part)
+    return 0;
+  /* Mode 3: only functions that are called through a pointer.  The
+     guessed branch frequencies are a weak guide; a function with direct
+     callers is more often one whose large part is its main path.  */
+  if (late_split_p && param_late_split_functions == 3 && !node->address_taken)
     return 0;
   bb_call_saves.truncate (0);
   if (late_split_p && targetm.target_option.analyze_bb_call_saves)

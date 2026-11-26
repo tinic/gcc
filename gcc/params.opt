@@ -410,7 +410,7 @@ Common Joined UInteger Var(param_l2_cache_size) Init(512) Param Optimization
 The size of L2 cache.
 
 -param=late-split-functions=
-Common Joined UInteger Var(param_late_split_functions) Init(0) IntegerRange(0, 2) Param Optimization
+Common Joined UInteger Var(param_late_split_functions) Init(0) IntegerRange(0, 3) Param Optimization
 Run the function splitter again after whole-program inlining: 1 where the target sees a gain in register saves, 2 for every part that is large enough.
 
 -param=late-split-entry-probability=
