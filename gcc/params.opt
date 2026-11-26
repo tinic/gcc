@@ -409,6 +409,14 @@ The size of L2 cache.
 Common Joined UInteger Var(param_late_split_functions) Init(0) IntegerRange(0, 1) Param Optimization
 Run the function splitter again after whole-program inlining.
 
+-param=late-split-entry-probability=
+Common Joined UInteger Var(param_late_split_entry_probability) Init(90) IntegerRange(0, 100) Param Optimization
+Maximum probability of the entry to a part that the late run of the function splitter moves out.
+
+-param=late-split-max-values=
+Common Joined UInteger Var(param_late_split_max_values) Init(3) Param Optimization
+The number of values, other than parameters, that the late run of the function splitter passes to a part.
+
 -param=late-split-min-size=
 Common Joined UInteger Var(param_late_split_min_size) Init(30) Param Optimization
 The smallest part that the late run of the function splitter moves out.

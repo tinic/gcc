@@ -84,6 +84,7 @@ along with GCC; see the file COPYING3.  If not see
 #include "cfghooks.h"
 #include "alloc-pool.h"
 #include "tree-pass.h"
+#include "stor-layout.h"
 #include "ssa.h"
 #include "cgraph.h"
 #include "diagnostic.h"
@@ -460,7 +461,8 @@ consider_split (class split_point *current, bitmap non_ssa_vars,
      is unknown.  */
   if (!(current->count
        < (ENTRY_BLOCK_PTR_FOR_FN (cfun)->count.apply_scale
-	   (param_partial_inlining_entry_probability, 100))))
+	   (late_split_p ? param_late_split_entry_probability
+	    : param_partial_inlining_entry_probability, 100))))
     {
       /* When profile is guessed, we cannot expect it to give us
 	 realistic estimate on likeliness of function taking the
@@ -618,7 +620,31 @@ consider_split (class split_point *current, bitmap non_ssa_vars,
   /* FIXME: we currently can pass only SSA function parameters to the split
      arguments.  Once parm_adjustment infrastructure is supported by cloning,
      we can pass more than that.  */
-  if (num_args != bitmap_count_bits (current->ssa_names_to_pass))
+  unsigned n_pass = bitmap_count_bits (current->ssa_names_to_pass);
+  /* The late run can pass a few other values as added parameters.  */
+  if (late_split_p
+      && n_pass > num_args
+      && n_pass - num_args <= (unsigned) param_late_split_max_values
+      && prototype_p (TREE_TYPE (current_function_decl))
+      && !stdarg_p (TREE_TYPE (current_function_decl)))
+    {
+      bool ok = true;
+      unsigned ver;
+      bitmap_iterator vbi;
+      EXECUTE_IF_SET_IN_BITMAP (current->ssa_names_to_pass, 0, ver, vbi)
+	{
+	  tree name = ssa_name (ver);
+	  if (!(SSA_NAME_IS_DEFAULT_DEF (name)
+		&& SSA_NAME_VAR (name)
+		&& TREE_CODE (SSA_NAME_VAR (name)) == PARM_DECL)
+	      && !INTEGRAL_TYPE_P (TREE_TYPE (name))
+	      && !POINTER_TYPE_P (TREE_TYPE (name)))
+	    ok = false;
+	}
+      if (ok)
+	n_pass = num_args;
+    }
+  if (num_args != n_pass)
     {
 
       if (dump_file && (dump_flags & TDF_DETAILS))
@@ -1245,6 +1271,88 @@ split_function (basic_block return_bb, class split_point *split_point,
   else
     args_to_skip = NULL;
 
+  /* In the late run the part can need values that are not parameters.
+     Make each of them a parameter of this function for the time of the
+     split: the part then gets it as a parameter of its own, and the call
+     passes the value.  */
+  auto_vec<std::pair<tree, tree> > live_ins;
+  tree saved_type = NULL_TREE;
+  if (late_split_p)
+    {
+      auto_vec<tree> names;
+      unsigned ver;
+      bitmap_iterator vbi;
+      EXECUTE_IF_SET_IN_BITMAP (split_point->ssa_names_to_pass, 0, ver, vbi)
+	{
+	  tree name = ssa_name (ver);
+	  if (!(SSA_NAME_IS_DEFAULT_DEF (name)
+		&& SSA_NAME_VAR (name)
+		&& TREE_CODE (SSA_NAME_VAR (name)) == PARM_DECL))
+	    names.safe_push (name);
+	}
+      if (!names.is_empty ())
+	{
+	  saved_type = TREE_TYPE (current_function_decl);
+	  tree *chain = &DECL_ARGUMENTS (current_function_decl);
+	  while (*chain)
+	    chain = &DECL_CHAIN (*chain);
+	  auto_vec<tree> types;
+	  for (tree t = TYPE_ARG_TYPES (saved_type);
+	       t && t != void_list_node; t = TREE_CHAIN (t))
+	    types.safe_push (TREE_VALUE (t));
+	  for (tree name : names)
+	    {
+	      tree type = TREE_TYPE (name);
+	      tree p = build_decl (DECL_SOURCE_LOCATION (current_function_decl),
+				   PARM_DECL, create_tmp_var_name ("livein"),
+				   type);
+	      DECL_ARG_TYPE (p) = type;
+	      DECL_CONTEXT (p) = current_function_decl;
+	      DECL_ARTIFICIAL (p) = 1;
+	      DECL_IGNORED_P (p) = 1;
+	      TREE_USED (p) = 1;
+	      layout_decl (p, 0);
+	      *chain = p;
+	      chain = &DECL_CHAIN (p);
+	      tree d = get_or_create_ssa_default_def (cfun, p);
+	      gimple *use_stmt;
+	      imm_use_iterator iter;
+	      FOR_EACH_IMM_USE_STMT (use_stmt, iter, name)
+		{
+		  use_operand_p use_p;
+		  bool changed = false;
+		  FOR_EACH_IMM_USE_ON_STMT (use_p, iter)
+		    {
+		      basic_block ubb = gimple_bb (use_stmt);
+		      if (gimple_code (use_stmt) == GIMPLE_PHI)
+			ubb = gimple_phi_arg_edge
+				(as_a <gphi *> (use_stmt),
+				 PHI_ARG_INDEX_FROM_USE (use_p))->src;
+		      if (!bitmap_bit_p (split_point->split_bbs, ubb->index))
+			continue;
+		      SET_USE (use_p, d);
+		      changed = true;
+		    }
+		  if (changed)
+		    update_stmt (use_stmt);
+		}
+	      bitmap_clear_bit (split_point->ssa_names_to_pass,
+				SSA_NAME_VERSION (name));
+	      bitmap_set_bit (split_point->ssa_names_to_pass,
+			      SSA_NAME_VERSION (d));
+	      live_ins.safe_push (std::make_pair (d, name));
+	      types.safe_push (type);
+	    }
+	  tree args = void_list_node;
+	  for (unsigned k = types.length (); k-- > 0;)
+	    args = tree_cons (NULL_TREE, types[k], args);
+	  tree new_type = build_function_type (TREE_TYPE (saved_type), args);
+	  new_type = build_type_attribute_variant
+		       (new_type, TYPE_ATTRIBUTES (saved_type));
+	  TREE_TYPE (current_function_decl) = new_type;
+	}
+    }
+
   /* Collect the parameters of new function and args_to_skip bitmap.  */
   for (parm = DECL_ARGUMENTS (current_function_decl);
        parm; parm = DECL_CHAIN (parm), num++)
@@ -1267,6 +1375,12 @@ split_function (basic_block return_bb, class split_point *split_point,
 	  arg = fold_convert (DECL_ARG_TYPE (parm), arg);
 	args_to_pass.safe_push (arg);
       }
+
+  /* The call passes the value, not the parameter that stands for it.  */
+  for (unsigned k = 0; k < args_to_pass.length (); k++)
+    for (auto &li : live_ins)
+      if (args_to_pass[k] == li.first)
+	args_to_pass[k] = li.second;
 
   /* See if the split function will return.  */
   bool split_part_return_p = false;
@@ -1392,9 +1506,19 @@ split_function (basic_block return_bb, class split_point *split_point,
   cgraph_edge::rebuild_edges ();
   node = cur_node->create_version_clone_with_body
     (vNULL, NULL, adjustments,
-     split_point->split_bbs, split_point->entry_bb, "part");
+     split_point->split_bbs, split_point->entry_bb,
+     late_split_p ? "lpart" : "part");
   delete adjustments;
   node->split_part = true;
+  if (saved_type)
+    {
+      /* This function has its own parameters again.  */
+      TREE_TYPE (current_function_decl) = saved_type;
+      tree *chain = &DECL_ARGUMENTS (current_function_decl);
+      while (*chain && SSA_NAME_VAR (live_ins[0].first) != *chain)
+	chain = &DECL_CHAIN (*chain);
+      *chain = NULL_TREE;
+    }
   if (late_split_p)
     {
       /* No inliner runs after this; compile the part as a function.  */
@@ -1789,6 +1913,12 @@ split_function (basic_block return_bb, class split_point *split_point,
     }
   free_dominance_info (CDI_DOMINATORS);
   free_dominance_info (CDI_POST_DOMINATORS);
+  for (auto &li : live_ins)
+    if (has_zero_uses (li.first))
+      {
+	set_ssa_default_def (cfun, SSA_NAME_VAR (li.first), NULL_TREE);
+	release_ssa_name (li.first);
+      }
   if (!late_split_p)
     compute_fn_summary (node, true);
 }
@@ -1894,7 +2024,8 @@ execute_split_functions (void)
       return 0;
     }
 
-  if (lookup_attribute ("noinline", DECL_ATTRIBUTES (current_function_decl)))
+  if (!late_split_p
+      && lookup_attribute ("noinline", DECL_ATTRIBUTES (current_function_decl)))
     {
       if (dump_file)
 	fprintf (dump_file, "Not splitting: function is noinline.\n");
