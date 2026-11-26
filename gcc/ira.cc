@@ -5418,12 +5418,16 @@ split_live_ranges_at_first_call (void)
       if (!reg || reg == pic_offset_table_rtx
 	  || DF_REG_DEF_COUNT (regno) == 0)
 	continue;
-      bool ok = true, used_inside = false;
+      bool ok = true, used_inside = false, set_outside = false;
+      /* A set after the split gets the new pseudo too.  The value before
+	 the split must come from a set before it.  */
       for (df_ref def = DF_REG_DEF_CHAIN (regno); def && ok;
 	   def = DF_REF_NEXT_REG (def))
-	if (DF_REF_IS_ARTIFICIAL (def) || inside (DF_REF_BB (def))
-	    || (DF_REF_FLAGS (def) & (DF_REF_PARTIAL | DF_REF_CONDITIONAL)))
+	if (DF_REF_IS_ARTIFICIAL (def))
 	  ok = false;
+	else if (!inside (DF_REF_BB (def)))
+	  set_outside = true;
+      ok &= set_outside;
       for (df_ref use = DF_REG_USE_CHAIN (regno); use && ok;
 	   use = DF_REF_NEXT_REG (use))
 	{
@@ -5459,6 +5463,13 @@ split_live_ranges_at_first_call (void)
       before_first_call_regs.safe_push (regno);
       df_ref use, next;
       for (use = DF_REG_USE_CHAIN (regno); use; use = next)
+	{
+	  rtx_insn *uin = DF_REF_INSN (use);
+	  next = DF_REF_NEXT_REG (use);
+	  if (inside (BLOCK_FOR_INSN (uin)))
+	    validate_change (uin, DF_REF_REAL_LOC (use), newreg, true);
+	}
+      for (use = DF_REG_DEF_CHAIN (regno); use; use = next)
 	{
 	  rtx_insn *uin = DF_REF_INSN (use);
 	  next = DF_REF_NEXT_REG (use);
