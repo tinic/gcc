@@ -73,6 +73,18 @@ along with GCC; see the file COPYING3.  If not see
 #include "cfgloop.h"
 
 
+#include "gimple.h"
+#include "ssa.h"
+#include "cgraph.h"
+#include "gimple-iterator.h"
+#include "tree-ssa-live.h"
+#include "symbol-summary.h"
+#include "sreal.h"
+#include "ipa-cp.h"
+#include "ipa-prop.h"
+#include "ipa-fnsummary.h"
+#include "builtins.h"
+
 /* This file should be included last.  */
 #include "target-def.h"
 
@@ -488,6 +500,13 @@ static HOST_WIDE_INT m68k_shrink_wrap_prologue_sp_adjust (void);
 #undef TARGET_SHRINK_WRAP_PROLOGUE_SP_ADJUST
 #define TARGET_SHRINK_WRAP_PROLOGUE_SP_ADJUST \
   m68k_shrink_wrap_prologue_sp_adjust
+static void m68k_analyze_ipa_call_saves (cgraph_node *);
+static unsigned m68k_ipa_call_save_cost (unsigned, unsigned, unsigned);
+
+#undef TARGET_ANALYZE_IPA_CALL_SAVES
+#define TARGET_ANALYZE_IPA_CALL_SAVES m68k_analyze_ipa_call_saves
+#undef TARGET_IPA_CALL_SAVE_COST
+#define TARGET_IPA_CALL_SAVE_COST m68k_ipa_call_save_cost
 
 struct gcc_target targetm = TARGET_INITIALIZER;
 
@@ -1379,6 +1398,158 @@ m68k_set_frame_related (rtx_insn *insn)
   if (GET_CODE (body) == PARALLEL)
     for (i = 0; i < XVECLEN (body, 0); i++)
       RTX_FRAME_RELATED_P (XVECEXP (body, 0, i)) = 1;
+}
+
+/* Estimate simultaneous SSA integer and pointer values in a block.  Both
+   classes have two scratch registers in the usual m68k C ABI.  */
+static void
+m68k_analyze_ipa_call_saves (cgraph_node *node)
+{
+  if (TARGET_COLDFIRE || !m68k_ipa_callback_saves
+      || m68k_get_function_kind (node->decl) != m68k_fk_normal_function)
+    return;
+
+  function *fun = cfun;
+  unsigned data_scratch = 0, addr_scratch = 0;
+  for (unsigned reg = D0_REG; reg < SP_REG; ++reg)
+    if (!fixed_regs[reg] && this_target_hard_regs->x_call_used_regs[reg])
+      {
+	if (reg < A0_REG)
+	  ++data_scratch;
+	else
+	  ++addr_scratch;
+      }
+  unsigned peak = 0;
+  var_map map = init_var_map (num_ssa_names);
+  tree_live_info_p ranges = calculate_live_ranges (map, false);
+  auto_bitmap calls, seen;
+  basic_block bb;
+  FOR_EACH_BB_FN (bb, fun)
+    {
+      auto_bitmap live;
+      unsigned int data = 0, addr = 0;
+      auto account = [&] (tree name, bool add)
+	{
+	  if (virtual_operand_p (name))
+	    return;
+	  bool pointer = POINTER_TYPE_P (TREE_TYPE (name));
+	  /* Without an FPU a floating-point value is in data registers.  */
+	  if (!pointer && !INTEGRAL_TYPE_P (TREE_TYPE (name))
+	      && !(!TARGET_HARD_FLOAT
+		   && SCALAR_FLOAT_TYPE_P (TREE_TYPE (name))))
+	    return;
+	  unsigned id = SSA_NAME_VERSION (name);
+	  unsigned &n = pointer ? addr : data;
+	  unsigned bits = TYPE_PRECISION (TREE_TYPE (name));
+	  unsigned words = MIN (2U, (bits + 31U) / 32U);
+	  if (add && bitmap_set_bit (live, id))
+	    n += words;
+	  else if (!add && bitmap_clear_bit (live, id))
+	    n -= words;
+	};
+      unsigned part;
+      bitmap_iterator bi;
+      EXECUTE_IF_SET_IN_BITMAP (live_on_exit (ranges, bb), 0, part, bi)
+	account (partition_to_var (map, part), true);
+      auto sample = [&] ()
+	{
+	  unsigned excess = (data > data_scratch ? data - data_scratch : 0)
+			    + (addr > addr_scratch ? addr - addr_scratch : 0);
+	  peak = MAX (peak, excess);
+	};
+      /* The end of the block: a block can have no statement, and its last
+	 statement can set a value that is live on exit.  */
+      sample ();
+      for (gimple_stmt_iterator i = gsi_last_bb (bb); !gsi_end_p (i);
+	   gsi_prev (&i))
+	{
+	  gimple *stmt = gsi_stmt (i);
+	  if (is_gimple_debug (stmt))
+	    continue;
+	  tree name;
+	  ssa_op_iter iter;
+	  FOR_EACH_SSA_TREE_OPERAND (name, stmt, iter, SSA_OP_DEF)
+	    account (name, false);
+	  if (is_gimple_call (stmt) && !gimple_call_internal_p (stmt)
+	      && !(gimple_call_builtin_p (stmt, BUILT_IN_NORMAL)
+		   && is_inexpensive_builtin (gimple_call_fndecl (stmt))))
+	    {
+	      bitmap_set_bit (calls, bb->index);
+	      peak = MAX (peak, data + addr);
+	      if (cgraph_edge *call = node->get_edge (stmt))
+		ipa_call_summaries->get_create (call)->live_across_call
+		  = MIN (data + addr, 15U);
+	    }
+	  FOR_EACH_SSA_TREE_OPERAND (name, stmt, iter, SSA_OP_USE)
+	    account (name, true);
+	  sample ();
+	}
+    }
+  delete_tree_live_info (ranges);
+  delete_var_map (map);
+  auto_vec<basic_block> todo;
+  todo.safe_push (ENTRY_BLOCK_PTR_FOR_FN (fun));
+  bool fast = false;
+  while (!todo.is_empty ())
+    {
+      bb = todo.pop ();
+      if (bb == EXIT_BLOCK_PTR_FOR_FN (fun))
+	{
+	  fast = true;
+	  break;
+	}
+      if (!bitmap_set_bit (seen, bb->index) || bitmap_bit_p (calls, bb->index))
+	continue;
+      edge e;
+      edge_iterator ei;
+      FOR_EACH_EDGE (e, ei, bb->succs)
+	if (!(e->flags & (EDGE_ABNORMAL | EDGE_EH | EDGE_FAKE)))
+	  todo.safe_push (e->dest);
+    }
+  ipa_fn_summary *info = ipa_fn_summaries->get (node);
+  info->self_saved_regs = MIN (peak, 11U);
+  /* An entrypoint function saves no register and a saveallregs function
+     saves all of them: an inlined body cannot add saves to either.  */
+  tree attrs = TYPE_ATTRIBUTES (TREE_TYPE (node->decl));
+  if (lookup_attribute ("entrypoint", attrs)
+      || lookup_attribute ("saveallregs", attrs))
+    fast = false;
+  info->call_free_return = fast;
+}
+
+/* Implement TARGET_IPA_CALL_SAVE_COST.  The unit is 1/100 of a call and
+   return.  Each added register, and the MOVEM pair itself, counts as one
+   whole call.
+
+   That is more than the instructions cost: on the 68000, MOVEM.L takes 16
+   cycles per register for the save and the restore together, and JSR with
+   RTS takes 36.  The price is set by measurement.  A price from the cycle
+   counts (45 per register) keeps too few calls out of line: on the 68060
+   it gives ADoom 2% to 5% and Heretic 1% to 3%, where this price gives
+   15% to 19%.  Prices from 100 to 250 differ by about 1%.  The inliner
+   underestimates what a merged body does to the callback: the register
+   estimate comes from GIMPLE, and the branch frequencies are guesses.
+
+   With nine or more added registers the price is above what a 90%
+   branch probability pays for, so __builtin_expect on the path to the call
+   does not change the decision for such a callee.  An inline declaration
+   or always_inline on the callee does; so does a profile.
+
+   Below MIN_MOVEM_REGS the function saves with single moves and the extra
+   work is small; leave those inlines to the ordinary heuristics.  A caller
+   that has a MOVEM pair already is left alone too: charging it for added
+   registers changed nothing in those workloads and vetoed more inlines
+   elsewhere.  */
+static unsigned
+m68k_ipa_call_save_cost (unsigned caller_saves, unsigned callee_saves,
+			 unsigned live)
+{
+  if (!m68k_ipa_callback_saves || TARGET_COLDFIRE)
+    return 0;
+  unsigned combined = MIN (11U, callee_saves + live);
+  if (caller_saves >= MIN_MOVEM_REGS || combined < MIN_MOVEM_REGS)
+    return 0;
+  return (combined - caller_saves + 1) * 100;
 }
 
 /* Emit RTL for the "prologue" define_expand.  */
