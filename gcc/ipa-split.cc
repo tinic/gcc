@@ -1324,7 +1324,12 @@ split_function (basic_block return_bb, class split_point *split_point,
 		  FOR_EACH_IMM_USE_ON_STMT (use_p, iter)
 		    {
 		      basic_block ubb = gimple_bb (use_stmt);
-		      if (gimple_code (use_stmt) == GIMPLE_PHI)
+		      /* A PHI of the part takes the value on its edges from
+			 the header too; the part has it as the parameter
+			 there.  A PHI of the return block takes it from the
+			 part on the edges that come from the part.  */
+		      if (gimple_code (use_stmt) == GIMPLE_PHI
+			  && !bitmap_bit_p (split_point->split_bbs, ubb->index))
 			ubb = gimple_phi_arg_edge
 				(as_a <gphi *> (use_stmt),
 				 PHI_ARG_INDEX_FROM_USE (use_p))->src;
@@ -1518,6 +1523,21 @@ split_function (basic_block return_bb, class split_point *split_point,
       while (*chain && SSA_NAME_VAR (live_ins[0].first) != *chain)
 	chain = &DECL_CHAIN (*chain);
       *chain = NULL_TREE;
+      /* And its own values, in the blocks that are about to go.  */
+      for (auto &li : live_ins)
+	{
+	  gimple *use_stmt;
+	  imm_use_iterator iter;
+	  FOR_EACH_IMM_USE_STMT (use_stmt, iter, li.first)
+	    {
+	      use_operand_p use_p;
+	      FOR_EACH_IMM_USE_ON_STMT (use_p, iter)
+		SET_USE (use_p, li.second);
+	      update_stmt (use_stmt);
+	    }
+	  set_ssa_default_def (cfun, SSA_NAME_VAR (li.first), NULL_TREE);
+	  release_ssa_name (li.first);
+	}
     }
   if (late_split_p)
     {
@@ -1913,12 +1933,6 @@ split_function (basic_block return_bb, class split_point *split_point,
     }
   free_dominance_info (CDI_DOMINATORS);
   free_dominance_info (CDI_POST_DOMINATORS);
-  for (auto &li : live_ins)
-    if (has_zero_uses (li.first))
-      {
-	set_ssa_default_def (cfun, SSA_NAME_VAR (li.first), NULL_TREE);
-	release_ssa_name (li.first);
-      }
   if (!late_split_p)
     compute_fn_summary (node, true);
 }
