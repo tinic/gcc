@@ -498,6 +498,11 @@ TARGET_GNU_ATTRIBUTES (m68k_attribute_table,
 static void m68k_analyze_ipa_call_saves (cgraph_node *);
 static unsigned m68k_ipa_call_save_cost (unsigned, unsigned, unsigned);
 
+static HOST_WIDE_INT m68k_shrink_wrap_prologue_sp_adjust (void);
+#undef TARGET_SHRINK_WRAP_PROLOGUE_SP_ADJUST
+#define TARGET_SHRINK_WRAP_PROLOGUE_SP_ADJUST \
+  m68k_shrink_wrap_prologue_sp_adjust
+
 #undef TARGET_ANALYZE_IPA_CALL_SAVES
 #define TARGET_ANALYZE_IPA_CALL_SAVES m68k_analyze_ipa_call_saves
 #undef TARGET_IPA_CALL_SAVE_COST
@@ -1688,6 +1693,17 @@ m68k_simple_return_ok_p (void)
     return false;
 #endif
   return true;
+}
+
+/* Implement TARGET_SHRINK_WRAP_PROLOGUE_SP_ADJUST.  */
+
+static HOST_WIDE_INT
+m68k_shrink_wrap_prologue_sp_adjust (void)
+{
+  if (!m68k_shrink_wrap_stack_args || frame_pointer_needed || TARGET_COLDFIRE)
+    return 0;
+  m68k_compute_frame_layout ();
+  return current_frame.offset + current_frame.size;
 }
 
 /* Return true if a simple (return) instruction is sufficient for this

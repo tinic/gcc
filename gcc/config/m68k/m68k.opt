@@ -245,3 +245,7 @@ Default: -fbbb=+ which yields -fbbb=abcefilmnprsz0
 mipa-callback-saves
 Target Var(m68k_ipa_callback_saves) Init(1)
 Account for extra register saves when inlining into callbacks at link time.
+
+mshrink-wrap-stack-args
+Target Var(m68k_shrink_wrap_stack_args) Init(1)
+Let code that runs before a shrink-wrapped prologue access stack arguments.
