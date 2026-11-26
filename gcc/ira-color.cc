@@ -2265,6 +2265,18 @@ assign_hard_reg (ira_allocno_t a, bool retry_p)
 	  cost += spill_cost;
 	  full_cost += spill_cost;
 	}
+      /* A value that ends at the first call is of use only in a register
+	 that needs no save: outweigh the copy to its other half.  */
+      if (ira_before_first_call_reg_p (ALLOCNO_REGNO (a))
+	  && !crtl->abi->clobbers_full_reg_p (hard_regno))
+	{
+	  enum reg_class cl = REGNO_REG_CLASS (hard_regno);
+	  int penalty = ((ira_memory_move_cost[mode][cl][0]
+			  + ira_memory_move_cost[mode][cl][1])
+			 * REG_FREQ_FROM_BB (ENTRY_BLOCK_PTR_FOR_FN (cfun)));
+	  cost += penalty;
+	  full_cost += penalty;
+	}
       if (min_cost > cost)
 	min_cost = cost;
       if (min_full_cost > full_cost)
@@ -3316,6 +3328,16 @@ improve_allocation (void)
 	    costs[hregno] += add_cost;
 	  }
 
+	  /* As in assign_hard_reg: do not move a value that ends at the
+	     first call to a register that needs a save.  */
+	  if (ira_before_first_call_reg_p (ALLOCNO_REGNO (a))
+	      && !crtl->abi->clobbers_full_reg_p (hregno))
+	    {
+	      enum reg_class cl = REGNO_REG_CLASS (hregno);
+	      costs[hregno] += ((ira_memory_move_cost[mode][cl][0]
+				 + ira_memory_move_cost[mode][cl][1])
+				* REG_FREQ_FROM_BB (ENTRY_BLOCK_PTR_FOR_FN (cfun)));
+	    }
 	  costs[hregno] -= base_cost;
 	  if (costs[hregno] < 0)
 	    try_p = true;

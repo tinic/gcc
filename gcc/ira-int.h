@@ -1544,6 +1544,11 @@ ira_allocate_and_set_or_copy_costs (int **vec, enum reg_class aclass,
 }
 
 extern rtx ira_create_new_reg (rtx);
+
+/* The pseudos whose live range ends at the first call, after
+   split_live_ranges_at_first_call.  They need a register that calls
+   clobber for the split to be of use.  */
+extern bool ira_before_first_call_reg_p (int);
 extern int first_moveable_pseudo, last_moveable_pseudo;
 
 /* Return the set of registers that would need a caller save if allocno A

@@ -5324,6 +5324,154 @@ split_live_ranges_for_shrink_wrap (void)
   return ret;
 }
 
+/* Split the live range of each pseudo that is set before the first call
+   and is live into the part of the function that has the calls.  The part
+   after the split is live across calls and gets a call-saved register; the
+   part before it does not need one, so the code that returns before any
+   call can run without the prologue (shrink-wrapping).
+
+   split_live_ranges_for_shrink_wrap does this for parameters that arrive
+   in registers.  This is the same for every other value: a parameter
+   from the stack, and anything computed from the parameters before an
+   early return.  Return true if the function has made any changes.  */
+
+static vec<int> before_first_call_regs;
+
+bool
+ira_before_first_call_reg_p (int regno)
+{
+  return before_first_call_regs.contains (regno);
+}
+
+static bool
+split_live_ranges_at_first_call (void)
+{
+  if (!SHRINK_WRAPPING_ENABLED || !param_ira_split_at_first_call
+      || !targetm.have_simple_return ())
+    return false;
+
+  basic_block bb, call_dom = NULL;
+  basic_block first = single_succ (ENTRY_BLOCK_PTR_FOR_FN (cfun));
+  rtx_insn *insn;
+  auto_bitmap with_call, reachable;
+  auto_vec<basic_block> queue;
+
+  FOR_EACH_BB_FN (bb, cfun)
+    FOR_BB_INSNS (bb, insn)
+      if (CALL_P (insn) && !SIBLING_CALL_P (insn))
+	{
+	  if (bb == first)
+	    return false;
+	  bitmap_set_bit (with_call, bb->index);
+	  bitmap_set_bit (reachable, bb->index);
+	  queue.safe_push (bb);
+	  break;
+	}
+  if (queue.is_empty ())
+    return false;
+  while (!queue.is_empty ())
+    {
+      edge e;
+      edge_iterator ei;
+      bb = queue.pop ();
+      FOR_EACH_EDGE (e, ei, bb->succs)
+	if (e->dest != EXIT_BLOCK_PTR_FOR_FN (cfun)
+	    && bitmap_set_bit (reachable, e->dest->index))
+	  queue.safe_push (e->dest);
+    }
+
+  call_dom = nearest_common_dominator_for_set (CDI_DOMINATORS, with_call);
+  loop_optimizer_init (AVOID_CFG_MODIFICATIONS);
+  while (call_dom != first && bb_loop_depth (call_dom) > 0)
+    call_dom = get_immediate_dominator (CDI_DOMINATORS, call_dom);
+  loop_optimizer_finalize ();
+  if (call_dom == first || EDGE_COUNT (call_dom->preds) == 0)
+    return false;
+  /* Nothing to gain if every path reaches the calls.  */
+  calculate_dominance_info (CDI_POST_DOMINATORS);
+  bool always = dominated_by_p (CDI_POST_DOMINATORS, first, call_dom);
+  free_dominance_info (CDI_POST_DOMINATORS);
+  if (always)
+    return false;
+
+  auto inside = [&] (basic_block b)
+    {
+      return b == call_dom || dominated_by_p (CDI_DOMINATORS, b, call_dom);
+    };
+
+  /* The values before the split need registers that calls clobber.  More
+     of them than there are such registers cannot all stay out of the
+     call-saved ones.  */
+  unsigned scratch = 0;
+  for (unsigned r = 0; r < FIRST_PSEUDO_REGISTER; r++)
+    if (TEST_HARD_REG_BIT (reg_class_contents[GENERAL_REGS], r)
+	&& !fixed_regs[r] && crtl->abi->clobbers_full_reg_p (r))
+      scratch++;
+
+  auto_vec<unsigned> cands;
+  unsigned regno;
+  bitmap_iterator bi;
+  EXECUTE_IF_SET_IN_BITMAP (df_get_live_in (call_dom), FIRST_PSEUDO_REGISTER,
+			    regno, bi)
+    {
+      rtx reg = regno_reg_rtx[regno];
+      if (!reg || reg == pic_offset_table_rtx
+	  || DF_REG_DEF_COUNT (regno) == 0)
+	continue;
+      bool ok = true, used_inside = false;
+      for (df_ref def = DF_REG_DEF_CHAIN (regno); def && ok;
+	   def = DF_REF_NEXT_REG (def))
+	if (DF_REF_IS_ARTIFICIAL (def) || inside (DF_REF_BB (def))
+	    || (DF_REF_FLAGS (def) & (DF_REF_PARTIAL | DF_REF_CONDITIONAL)))
+	  ok = false;
+      for (df_ref use = DF_REG_USE_CHAIN (regno); use && ok;
+	   use = DF_REF_NEXT_REG (use))
+	{
+	  if (DF_REF_IS_ARTIFICIAL (use))
+	    {
+	      ok = false;
+	      break;
+	    }
+	  if (!NONDEBUG_INSN_P (DF_REF_INSN (use)))
+	    continue;
+	  basic_block ubb = DF_REF_BB (use);
+	  if (inside (ubb))
+	    used_inside = true;
+	  /* A use after a call that the split does not cover keeps the
+	     old value live across the call.  */
+	  else if (bitmap_bit_p (reachable, ubb->index))
+	    ok = false;
+	}
+      if (ok && used_inside)
+	cands.safe_push (regno);
+    }
+  if (cands.is_empty () || cands.length () > scratch)
+    return false;
+
+  if (dump_file)
+    fprintf (dump_file, "Will split %u live ranges at the first call, BB %i\n",
+	     cands.length (), call_dom->index);
+
+  for (unsigned regno : cands)
+    {
+      rtx dest = regno_reg_rtx[regno];
+      rtx newreg = ira_create_new_reg (dest);
+      before_first_call_regs.safe_push (regno);
+      df_ref use, next;
+      for (use = DF_REG_USE_CHAIN (regno); use; use = next)
+	{
+	  rtx_insn *uin = DF_REF_INSN (use);
+	  next = DF_REF_NEXT_REG (use);
+	  if (inside (BLOCK_FOR_INSN (uin)))
+	    validate_change (uin, DF_REF_REAL_LOC (use), newreg, true);
+	}
+      emit_insn_after (gen_move_insn (newreg, dest), bb_note (call_dom));
+    }
+  if (!apply_change_group ())
+    gcc_unreachable ();
+  return true;
+}
+
 /* Perform the second half of the transformation started in
    find_moveable_pseudos.  We look for instances where the newly introduced
    pseudo remains unallocated, and remove it by moving the definition to
@@ -5804,6 +5952,9 @@ ira (FILE *f)
       calculate_dominance_info (CDI_DOMINATORS);
 
       if (split_live_ranges_for_shrink_wrap ())
+	df_analyze ();
+      before_first_call_regs.truncate (0);
+      if (split_live_ranges_at_first_call ())
 	df_analyze ();
 
       free_dominance_info (CDI_DOMINATORS);

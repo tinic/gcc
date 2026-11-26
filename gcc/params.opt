@@ -337,6 +337,10 @@ Additional maximum allowed growth of total size of new parameters that ipa-sra r
 Common Joined UInteger Var(param_ira_loop_reserved_regs) Init(2) Param Optimization
 The number of registers in each class kept unused by loop invariant motion.
 
+-param=ira-split-at-first-call=
+Common Joined UInteger Var(param_ira_split_at_first_call) Init(1) IntegerRange(0, 1) Param Optimization
+Split the live ranges of values that are set before the first call, to prepare for shrink-wrapping.
+
 -param=ira-max-conflict-table-size=
 Common Joined UInteger Var(param_ira_max_conflict_table_size) Init(1000) Param Optimization
 Maximum size of conflict table in MB.
