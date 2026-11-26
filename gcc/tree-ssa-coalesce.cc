@@ -22,6 +22,7 @@ along with GCC; see the file COPYING3.  If not see
 #include "system.h"
 #include "coretypes.h"
 #include "backend.h"
+#include "target.h"
 #include "tree.h"
 #include "gimple.h"
 #include "predict.h"
@@ -1072,6 +1073,26 @@ create_coalesce_list_for_region (var_map map, bitmap used_in_copy)
 	  if (map->bitint && !bitmap_bit_p (map->bitint, ver))
 	    continue;
 
+	  /* A PHI that feeds only the return statement and merges a constant
+	     with computed values: the constant comes from an early return.
+	     Keep its result apart from the computed values.  A value that
+	     is live across a call gets a call-saved register; merged with
+	     the result, it puts that register on the early returns too, and
+	     the prologue cannot move past them (shrink-wrapping).  Apart,
+	     the result goes in the return register.  */
+	  bool return_merge = false;
+	  if (flag_shrink_wrap && param_split_return_phi
+	      && targetm.have_simple_return ())
+	    {
+	      gimple *use;
+	      use_operand_p use_p;
+	      if (single_imm_use (res, &use_p, &use)
+		  && gimple_code (use) == GIMPLE_RETURN)
+		for (i = 0; i < gimple_phi_num_args (phi); i++)
+		  if (TREE_CODE (PHI_ARG_DEF (phi, i)) != SSA_NAME)
+		    return_merge = true;
+	    }
+
 	  /* Register ssa_names and coalesces between the args and the result
 	     of all PHI.  */
 	  for (i = 0; i < gimple_phi_num_args (phi); i++)
@@ -1080,6 +1101,12 @@ create_coalesce_list_for_region (var_map map, bitmap used_in_copy)
 	      arg = PHI_ARG_DEF (phi, i);
 	      if (TREE_CODE (arg) != SSA_NAME)
 		continue;
+	      if (return_merge && !(e->flags & EDGE_ABNORMAL))
+		{
+		  saw_copy = true;
+		  bitmap_set_bit (used_in_copy, SSA_NAME_VERSION (arg));
+		  continue;
+		}
 
 	      if (gimple_can_coalesce_p (arg, res)
 		  || (e->flags & EDGE_ABNORMAL))

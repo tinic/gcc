@@ -1093,6 +1093,10 @@ Maximum size, in storage units, of an aggregate which should be considered for s
 Common Joined UInteger Var(param_sra_max_scalarization_size_speed) Param Optimization
 Maximum size, in storage units, of an aggregate which should be considered for scalarization when compiling for speed.
 
+-param=split-return-phi=
+Common Joined UInteger Var(param_split_return_phi) Init(1) IntegerRange(0, 1) Param Optimization
+Keep the result of a return PHI that merges a constant apart from its computed arguments, to prepare for shrink-wrapping.
+
 -param=sra-max-propagations=
 Common Joined UInteger Var(param_sra_max_propagations) Param Optimization Init(32)
 Maximum number of artificial accesses to enable forward propagation that Scalar Replacement of Aggregates keeps for one local variable.
