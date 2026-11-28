@@ -5111,17 +5111,43 @@ find_moveable_pseudos (void)
   free_dominance_info (CDI_DOMINATORS);
 }
 
+/* Return true if X is the stack slot of an incoming argument, on a target
+   where code that runs before a shrink-wrapped prologue can access such a
+   slot.  */
+
+static bool
+incoming_stack_arg_p (rtx x)
+{
+  if (!param_ira_split_stack_args
+      || !targetm.shrink_wrap.prologue_sp_adjust || !MEM_P (x)
+      || MEM_VOLATILE_P (x))
+    return false;
+  rtx addr = XEXP (x, 0);
+  if (GET_CODE (addr) == PLUS && CONST_INT_P (XEXP (addr, 1)))
+    addr = XEXP (addr, 0);
+  return addr == arg_pointer_rtx;
+}
+
 /* If SET pattern SET is an assignment from a hard register to a pseudo which
    is live at CALL_DOM (if non-NULL, otherwise this check is omitted), return
-   the destination.  Otherwise return NULL.  */
+   the destination.  The same holds for the only assignment to a pseudo, if
+   it is a load of an incoming stack argument.  Otherwise return NULL.  */
 
 static rtx
 interesting_dest_for_shprep_1 (rtx set, basic_block call_dom)
 {
   rtx src = SET_SRC (set);
   rtx dest = SET_DEST (set);
-  if (!REG_P (src) || !HARD_REGISTER_P (src)
-      || !REG_P (dest) || HARD_REGISTER_P (dest)
+  if (!REG_P (dest) || HARD_REGISTER_P (dest))
+    return NULL;
+  if (incoming_stack_arg_p (src))
+    {
+      if (DF_REG_DEF_COUNT (REGNO (dest)) != 1)
+	return NULL;
+    }
+  else if (!REG_P (src) || !HARD_REGISTER_P (src))
+    return NULL;
+  if (false
       || (call_dom && !bitmap_bit_p (df_get_live_in (call_dom), REGNO (dest))))
     return NULL;
   return dest;
