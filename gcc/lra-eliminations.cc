@@ -68,6 +68,8 @@ along with GCC; see the file COPYING3.	If not see
 #include "output.h"
 #include "rtl-error.h"
 #include "lra-int.h"
+#include "cfganal.h"
+#include "common/common-target.h"
 
 /* This structure is used to record information about hard register
    eliminations.  */
@@ -1339,40 +1341,144 @@ init_elim_table (void)
   lra_in_progress = true;
 }
 
+/* The stack pointer offset at the start of each basic block, by block
+   index.  It is empty if each block starts with offset zero.  */
+static vec<poly_int64> bb_entry_sp_offset;
+
+/* Return the stack pointer offset at the start of BB.  */
+poly_int64
+lra_bb_entry_sp_offset (basic_block bb)
+{
+  if (bb && (unsigned) bb->index < bb_entry_sp_offset.length ())
+    return bb_entry_sp_offset[bb->index];
+  return 0;
+}
+
+/* Set BB_ENTRY_SP_OFFSET from DELTA, the change that each block makes to
+   the stack pointer.  A block can end with arguments on the stack when
+   its last insn is a call that can throw, because the insns that pop the
+   arguments are then in the next block.  Follow the offset along the
+   fall-through and jump edges.  The DWARF unwinder removes the pushed
+   arguments before it enters a landing pad (REG_ARGS_SIZE), so the
+   offset at the destination of an EH edge is zero.  Return false if the
+   offset at the start of a block is not the same on each path, or if it
+   is not zero at an edge for which we do not know what the stack pointer
+   is at the destination.  */
+static bool
+propagate_sp_offsets (const vec<poly_int64> &delta)
+{
+  bool dwarf_eh_p
+    = targetm_common.except_unwind_info (&global_options) == UI_DWARF2;
+  unsigned int n = last_basic_block_for_fn (cfun);
+  auto_sbitmap known (n);
+  auto_vec<basic_block, 32> stack;
+  edge e;
+  edge_iterator ei;
+
+  bitmap_clear (known);
+  bb_entry_sp_offset.safe_grow_cleared (n, true);
+  FOR_EACH_EDGE (e, ei, ENTRY_BLOCK_PTR_FOR_FN (cfun)->succs)
+    if (bitmap_set_bit (known, e->dest->index))
+      stack.safe_push (e->dest);
+  while (!stack.is_empty ())
+    {
+      basic_block bb = stack.pop ();
+      poly_int64 end = bb_entry_sp_offset[bb->index] + delta[bb->index];
+      FOR_EACH_EDGE (e, ei, bb->succs)
+	{
+	  poly_int64 offset = end;
+	  if ((e->flags & EDGE_EH) && dwarf_eh_p)
+	    offset = 0;
+	  else if ((e->flags & (EDGE_ABNORMAL | EDGE_EH | EDGE_SIBCALL
+				| EDGE_FAKE))
+		   || e->dest == EXIT_BLOCK_PTR_FOR_FN (cfun))
+	    {
+	      if (maybe_ne (end, 0))
+		return false;
+	    }
+	  if (e->dest == EXIT_BLOCK_PTR_FOR_FN (cfun))
+	    continue;
+	  if (bitmap_set_bit (known, e->dest->index))
+	    {
+	      bb_entry_sp_offset[e->dest->index] = offset;
+	      stack.safe_push (e->dest);
+	    }
+	  else if (maybe_ne (bb_entry_sp_offset[e->dest->index], offset))
+	    return false;
+	}
+    }
+  return true;
+}
+
 /* Function for initialization of elimination once per function.  It
    sets up sp offset for each insn.  */
 static void
 init_elimination (void)
 {
-  bool stop_to_sp_elimination_p;
+  bool stop_to_sp_elimination_p = false;
   basic_block bb;
   rtx_insn *insn;
   class lra_elim_table *ep;
+  auto_vec<poly_int64> delta;
 
   init_elim_table ();
+  bb_entry_sp_offset.truncate (0);
+  delta.safe_grow_cleared (last_basic_block_for_fn (cfun), true);
   FOR_EACH_BB_FN (bb, cfun)
     {
       curr_sp_change = 0;
-      stop_to_sp_elimination_p = false;
       FOR_BB_INSNS (bb, insn)
 	if (INSN_P (insn))
 	  {
 	    lra_get_insn_recog_data (insn)->sp_offset = curr_sp_change;
 	    if (NONDEBUG_INSN_P (insn))
-	      {
-		mark_not_eliminable (PATTERN (insn), VOIDmode);
-		if (maybe_ne (curr_sp_change, 0)
-		    && find_reg_note (insn, REG_LABEL_OPERAND, NULL_RTX))
-		  stop_to_sp_elimination_p = true;
-	      }
+	      mark_not_eliminable (PATTERN (insn), VOIDmode);
 	  }
-      if (! frame_pointer_needed
-	  && (maybe_ne (curr_sp_change, 0) || stop_to_sp_elimination_p)
+      delta[bb->index] = curr_sp_change;
+      if (maybe_ne (curr_sp_change, 0)
 	  && bb->succs && bb->succs->length () != 0)
-	for (ep = reg_eliminate; ep < &reg_eliminate[NUM_ELIMINABLE_REGS]; ep++)
-	  if (ep->to == STACK_POINTER_REGNUM)
-	    setup_can_eliminate (ep, false);
+	stop_to_sp_elimination_p = true;
     }
+  /* The offset is not zero at the end of a block.  Elimination to the
+     stack pointer is still possible if we know the offset at the start
+     of each block.  */
+  if (stop_to_sp_elimination_p && !frame_pointer_needed)
+    {
+      if (propagate_sp_offsets (delta))
+	stop_to_sp_elimination_p = false;
+      else
+	bb_entry_sp_offset.truncate (0);
+    }
+  else
+    stop_to_sp_elimination_p = false;
+  FOR_EACH_BB_FN (bb, cfun)
+    {
+      poly_int64 entry = lra_bb_entry_sp_offset (bb);
+      FOR_BB_INSNS (bb, insn)
+	if (INSN_P (insn))
+	  {
+	    lra_insn_recog_data_t id = lra_get_insn_recog_data (insn);
+	    if (NONDEBUG_INSN_P (insn)
+		&& maybe_ne (id->sp_offset + entry, 0)
+		&& find_reg_note (insn, REG_LABEL_OPERAND, NULL_RTX))
+	      stop_to_sp_elimination_p = true;
+	  }
+    }
+  if (stop_to_sp_elimination_p)
+    bb_entry_sp_offset.truncate (0);
+  else if (bb_entry_sp_offset.length () != 0)
+    FOR_EACH_BB_FN (bb, cfun)
+      {
+	poly_int64 entry = lra_bb_entry_sp_offset (bb);
+	if (maybe_ne (entry, 0))
+	  FOR_BB_INSNS (bb, insn)
+	    if (INSN_P (insn))
+	      lra_get_insn_recog_data (insn)->sp_offset += entry;
+      }
+  if (! frame_pointer_needed && stop_to_sp_elimination_p)
+    for (ep = reg_eliminate; ep < &reg_eliminate[NUM_ELIMINABLE_REGS]; ep++)
+      if (ep->to == STACK_POINTER_REGNUM)
+	setup_can_eliminate (ep, false);
   setup_elimination_map ();
 }
 

@@ -458,6 +458,7 @@ extern bool lra_fp_pseudo_p (void);
 extern void lra_eliminate (bool, bool);
 
 extern poly_int64 lra_update_sp_offset (rtx, poly_int64);
+extern poly_int64 lra_bb_entry_sp_offset (basic_block);
 extern void lra_eliminate_reg_if_possible (rtx *);
 
 

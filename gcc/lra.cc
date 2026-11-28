@@ -1885,12 +1885,12 @@ push_insns (rtx_insn *from, rtx_insn *to)
 
 /* Set up and return sp offset for insns in range [FROM, LAST].  The offset is
    taken from the BB insn before FROM after simulating its effects,
-   or zero if there is no such insn.  */
+   or from the start of the block if there is no such insn.  */
 static poly_int64
 setup_sp_offset (rtx_insn *from, rtx_insn *last)
 {
   rtx_insn *before = prev_nonnote_nondebug_insn_bb (from);
-  poly_int64 offset = 0;
+  poly_int64 offset = lra_bb_entry_sp_offset (BLOCK_FOR_INSN (from));
 
   if (before && INSN_P (before))
     offset = lra_update_sp_offset (PATTERN (before),
